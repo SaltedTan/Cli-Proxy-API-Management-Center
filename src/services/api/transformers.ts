@@ -13,6 +13,10 @@ import { isRecord } from '@/utils/helpers';
 import { readCredentialWeight } from '@/utils/credentialWeight';
 import { normalizeModelOptions, normalizeModelThinking } from './providerModels';
 
+/** v8 `/config` reports `auth_index`; `auth-index` is accepted for older payload shapes. */
+const readAuthIndex = (record: Record<string, unknown> | null | undefined): string | undefined =>
+  normalizeAuthIndex(record?.['auth_index']) ?? normalizeAuthIndex(record?.['auth-index']);
+
 const normalizeBoolean = (value: unknown): boolean | undefined =>
   typeof value === 'boolean' ? value : undefined;
 
@@ -110,7 +114,7 @@ const normalizeApiKeyEntry = (entry: unknown): ApiKeyEntry | null => {
 
   const proxyUrl = record?.['proxy-url'];
   const weight = readCredentialWeight(record?.weight);
-  const authIndex = normalizeAuthIndex(record?.['auth-index']);
+  const authIndex = readAuthIndex(record);
 
   const result: ApiKeyEntry = {
     apiKey: trimmed,
@@ -184,7 +188,7 @@ const normalizeProviderKeyConfig = (item: unknown): ProviderKeyConfig | null => 
   if (models.length) config.models = models;
   const excludedModels = normalizeExcludedModels(record?.['excluded-models']);
   if (excludedModels.length) config.excludedModels = excludedModels;
-  const authIndex = normalizeAuthIndex(record?.['auth-index']);
+  const authIndex = readAuthIndex(record);
   if (authIndex) config.authIndex = authIndex;
 
   const cloakRaw = record?.cloak;
@@ -252,7 +256,7 @@ const normalizeGeminiKeyConfig = (item: unknown): GeminiKeyConfig | null => {
   if (headers) config.headers = headers;
   const excludedModels = normalizeExcludedModels(record?.['excluded-models']);
   if (excludedModels.length) config.excludedModels = excludedModels;
-  const authIndex = normalizeAuthIndex(record?.['auth-index']);
+  const authIndex = readAuthIndex(record);
   if (authIndex) config.authIndex = authIndex;
   return config;
 };
@@ -299,7 +303,7 @@ const normalizeOpenAIProvider = (
   if (models.length) result.models = models;
   if (priority !== undefined) result.priority = Number(priority);
   if (testModel) result.testModel = String(testModel);
-  const authIndex = normalizeAuthIndex(provider['auth-index']);
+  const authIndex = readAuthIndex(provider);
   if (authIndex) result.authIndex = authIndex;
   if (sourceIndex !== undefined) result.sourceIndex = sourceIndex;
   return result;
@@ -362,6 +366,9 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
   config.forceModelPrefix = normalizeBoolean(at('routing.force-model-prefix'));
   const strategy = at('routing.strategy');
   if (typeof strategy === 'string') config.routingStrategy = strategy;
+  config.routingSessionAffinity = normalizeBoolean(at('routing.session-affinity')) ?? false;
+  const affinityTtl = at('routing.session-affinity-ttl');
+  if (typeof affinityTtl === 'string') config.routingSessionAffinityTtl = affinityTtl;
   const keys = at('access.api-keys');
   config.apiKeys = Array.isArray(keys)
     ? keys.filter((key): key is string => typeof key === 'string')

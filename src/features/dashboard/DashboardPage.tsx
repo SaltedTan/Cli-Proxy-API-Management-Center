@@ -17,6 +17,8 @@ import { LiveWire } from './components/LiveWire';
 import { Meter } from './components/Meter';
 import { Sparkline } from './components/Sparkline';
 import { ThroughputChart } from './components/ThroughputChart';
+import { RoutingPanel } from './components/RoutingPanel';
+import { routingStrategyLabelKey } from './routing';
 import { useCountUp, useRevealGroup, useRevealOnScroll } from '@/hooks/motion';
 import { providerLabel, splitWindowMinutes, toneForSuccessRate, type MeterTone } from './utils';
 import styles from './dashboard.module.scss';
@@ -40,8 +42,18 @@ export function DashboardPage() {
   const serverVersion = useAuthStore((state) => state.serverVersion);
   const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
 
-  const { connectionStatus, connected, config, counts, traffic, providers, credentials, refresh } =
-    useDashboardOverview();
+  const {
+    connectionStatus,
+    connected,
+    config,
+    counts,
+    traffic,
+    providers,
+    credentials,
+    authFiles,
+    routing,
+    refresh,
+  } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
 
@@ -50,6 +62,7 @@ export function DashboardPage() {
   const statsRef = useRevealGroup<HTMLElement>(0.12);
   const trafficRef = useRevealOnScroll<HTMLElement>();
   const fleetRef = useRevealOnScroll<HTMLElement>();
+  const routingRef = useRevealOnScroll<HTMLElement>();
   const detailRef = useRevealGroup<HTMLElement>();
   const ctaRef = useRevealGroup<HTMLElement>();
 
@@ -71,12 +84,8 @@ export function DashboardPage() {
   const routingStrategy = useMemo(() => {
     const raw = config?.routingStrategy?.trim() ?? '';
     if (!raw) return DASH;
-    if (raw === 'round-robin') return t('basic_settings.routing_strategy_round_robin');
-    if (raw === 'weighted-round-robin') {
-      return t('basic_settings.routing_strategy_weighted_round_robin');
-    }
-    if (raw === 'fill-first') return t('basic_settings.routing_strategy_fill_first');
-    return raw;
+    const labelKey = routingStrategyLabelKey(raw);
+    return labelKey ? t(labelKey) : raw;
   }, [config?.routingStrategy, t]);
 
   const unknownProviderLabel = t('dashboard.provider_unknown');
@@ -403,6 +412,16 @@ export function DashboardPage() {
             </ul>
           )}
         </div>
+      </section>
+
+      {/* ---------- Routing ---------- */}
+      <section className={styles.section} ref={routingRef}>
+        <header className={styles.sectionHead}>
+          <span className={styles.eyebrow}>{t('dashboard.routing_eyebrow')}</span>
+          <h2 className={styles.sectionTitle}>{t('dashboard.routing_title')}</h2>
+          <p className={styles.sectionDescription}>{t('dashboard.routing_description')}</p>
+        </header>
+        <RoutingPanel routing={routing} config={config} authFiles={authFiles} />
       </section>
 
       {/* ---------- Credential health + runtime ---------- */}

@@ -3,6 +3,7 @@ import { authFilesApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useModelsStore } from '@/stores';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
+import { useRoutingObservability } from './useRoutingObservability';
 import {
   mergeRecentRequestBucketGroups,
   normalizeRecentRequestUsageEntry,
@@ -127,6 +128,8 @@ export function useDashboardOverview() {
     enabled: connected,
   });
 
+  const { routing, refreshRouting } = useRoutingObservability(connected, apiBase);
+
   const [authFiles, setAuthFiles] = useState<AuthFileItem[] | null>(null);
 
   const loadAuthFiles = useCallback(async () => {
@@ -163,8 +166,9 @@ export function useDashboardOverview() {
       loadAuthFiles(),
       loadModels(),
       refreshRecentRequests(),
+      refreshRouting(),
     ]);
-  }, [connected, fetchConfig, loadAuthFiles, loadModels, refreshRecentRequests]);
+  }, [connected, fetchConfig, loadAuthFiles, loadModels, refreshRecentRequests, refreshRouting]);
 
   const providerKeyCounts = useMemo(() => (config ? getProviderKeyCounts(config) : null), [config]);
 
@@ -291,6 +295,8 @@ export function useDashboardOverview() {
     traffic,
     providers,
     credentials,
+    authFiles,
+    routing,
     refresh,
   };
 }
