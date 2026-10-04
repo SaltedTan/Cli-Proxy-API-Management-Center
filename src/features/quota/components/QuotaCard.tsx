@@ -5,6 +5,9 @@
  * - loading：双幽灵行骨架（aria-busy，文字等价视觉隐藏）；
  * - error：失败色条 + footer 刷新即重试；
  * - success：provider Body（穿 QuotaBody.module.scss 全页外衣）。
+ *
+ * body + footer 拆为 QuotaCardContent：账本视图的行展开详情复用同一份
+ * provider 细节与重置动作，不重复实现。
  */
 
 import { useState, type CSSProperties } from 'react';
@@ -13,6 +16,7 @@ import { IconRefreshCw } from '@/components/ui/icons';
 import type { ResolvedTheme } from '@/types';
 import { resolveQuotaErrorMessage } from '@/utils/quota';
 import { getQuotaDisplayName } from '@/utils/quota/identity';
+import { maskEmailsInText } from '../maskEmail';
 import {
   getAuthFileIcon,
   getThemeSurfaceIconBackground,
@@ -29,33 +33,31 @@ import styles from './QuotaCard.module.scss';
 /** 额度页全页外衣：QuotaBody 模块绑定成类型化契约（缺键在模块初始化即抛）。 */
 const quotaClasses = bindQuotaClasses(bodyStyles, 'QuotaBody.module.scss');
 
-export type QuotaCardProps = {
+export type QuotaCardContentProps = {
   entry: QuotaFileEntry;
   quota?: QuotaCardState;
-  resolvedTheme: ResolvedTheme;
   canRefresh: boolean;
   resetting: boolean;
-  /** 首屏级联入场延迟；null = 不入场（切 tab / 翻页 / 刷新新挂载的卡片）。 */
-  entranceDelayMs?: number | null;
   onRefresh: () => void;
   onReset: () => void;
+  /** 账本行自带刷新按钮，展开详情里不再重复。 */
+  showRefresh?: boolean;
+};
+
+export type QuotaCardProps = Omit<QuotaCardContentProps, 'showRefresh'> & {
+  resolvedTheme: ResolvedTheme;
+  /** 首屏级联入场延迟；null = 不入场（切 tab / 翻页 / 刷新新挂载的卡片）。 */
+  entranceDelayMs?: number | null;
+  /** 页头「显示邮箱」关闭时为 true。 */
+  maskEmails?: boolean;
 };
 
 export function QuotaCard(props: QuotaCardProps) {
-  const {
-    entry,
-    quota,
-    resolvedTheme,
-    canRefresh,
-    resetting,
-    entranceDelayMs,
-    onRefresh,
-    onReset,
-  } = props;
+  const { entry, resolvedTheme, entranceDelayMs, maskEmails = false, ...content } = props;
   const { t } = useTranslation();
-  const adapter = QUOTA_ADAPTERS[entry.type];
   const file = entry.file;
-  const displayName = getQuotaDisplayName(file);
+  const rawName = getQuotaDisplayName(file);
+  const displayName = maskEmails ? maskEmailsInText(rawName, file.email) : rawName;
 
   // 挂载时捕获一次延迟：后续 props 变 null 不影响本卡（React 19 禁渲染期读 ref）
   const [mountEntranceDelayMs] = useState<number | null>(entranceDelayMs ?? null);
@@ -64,27 +66,8 @@ export function QuotaCard(props: QuotaCardProps) {
       ? undefined
       : ({ '--card-delay': `${mountEntranceDelayMs}ms` } as CSSProperties);
 
-  const status = quota?.status ?? 'idle';
-  const loading = status === 'loading';
-  const claudeReset = useClaudeResetGrants(
-    file,
-    entry.type === 'claude' && status !== 'idle',
-    !canRefresh || loading || resetting,
-    quota,
-    onRefresh
-  );
   const iconSrc = getAuthFileIcon(entry.type, resolvedTheme);
   const typeLabel = getTypeLabel(t, entry.type);
-  const errorMessage = resolveQuotaErrorMessage(
-    t,
-    quota?.errorStatus,
-    quota?.error || t('common.unknown_error')
-  );
-  const showReset =
-    status === 'success' &&
-    Boolean(adapter.resetQuota) &&
-    quota !== undefined &&
-    Boolean(adapter.canResetQuota?.(quota));
 
   return (
     <article
@@ -112,6 +95,40 @@ export function QuotaCard(props: QuotaCardProps) {
         </span>
       </header>
 
+      <QuotaCardContent entry={entry} {...content} />
+    </article>
+  );
+}
+
+export function QuotaCardContent(props: QuotaCardContentProps) {
+  const { entry, quota, canRefresh, resetting, onRefresh, onReset, showRefresh = true } = props;
+  const { t } = useTranslation();
+  const adapter = QUOTA_ADAPTERS[entry.type];
+  const file = entry.file;
+
+  const status = quota?.status ?? 'idle';
+  const loading = status === 'loading';
+  const claudeReset = useClaudeResetGrants(
+    file,
+    entry.type === 'claude' && status !== 'idle',
+    !canRefresh || loading || resetting,
+    quota,
+    onRefresh
+  );
+  const errorMessage = resolveQuotaErrorMessage(
+    t,
+    quota?.errorStatus,
+    quota?.error || t('common.unknown_error')
+  );
+  const showReset =
+    status === 'success' &&
+    Boolean(adapter.resetQuota) &&
+    quota !== undefined &&
+    Boolean(adapter.canResetQuota?.(quota));
+  const hasActions = entry.type === 'claude' || showReset || showRefresh;
+
+  return (
+    <>
       <div className={styles.body}>
         {entry.type === 'claude' && status === 'success' && (
           <>
@@ -159,7 +176,7 @@ export function QuotaCard(props: QuotaCardProps) {
         )}
       </div>
 
-      {status !== 'idle' && (
+      {status !== 'idle' && hasActions && (
         <footer className={styles.actionRow}>
           {entry.type === 'claude' && (
             <button
@@ -185,18 +202,20 @@ export function QuotaCard(props: QuotaCardProps) {
               {t('codex_quota.reset_button')}
             </button>
           )}
-          <button
-            type="button"
-            className={styles.actionPill}
-            onClick={onRefresh}
-            disabled={isQuotaRefreshDisabled(canRefresh, loading, resetting || claudeReset.busy)}
-            title={t('auth_files.quota_refresh_hint')}
-          >
-            <IconRefreshCw size={13} className={loading ? styles.spinning : undefined} />
-            {t('auth_files.quota_refresh_single')}
-          </button>
+          {showRefresh && (
+            <button
+              type="button"
+              className={styles.actionPill}
+              onClick={onRefresh}
+              disabled={isQuotaRefreshDisabled(canRefresh, loading, resetting || claudeReset.busy)}
+              title={t('auth_files.quota_refresh_hint')}
+            >
+              <IconRefreshCw size={13} className={loading ? styles.spinning : undefined} />
+              {t('auth_files.quota_refresh_single')}
+            </button>
+          )}
         </footer>
       )}
-    </article>
+    </>
   );
 }

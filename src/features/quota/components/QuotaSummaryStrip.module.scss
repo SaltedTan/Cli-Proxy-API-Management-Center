@@ -1,0 +1,243 @@
+@use '../../../styles/mixins' as *;
+
+/* ============================================================
+ * 提供商汇总条：一个圆角面板，按提供商切格。
+ * 1px gap 透出面板底色充当分隔线 —— 换行后横竖分隔仍然连续。
+ * 遥测数字一律 tabular-nums。
+ * ============================================================ */
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--border-color);
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 18px 15px;
+  background: var(--bg-primary);
+}
+
+/* ---------- 头部：图标 + 名称 + 凭证数 ---------- */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.iconWrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  display: block;
+}
+
+.iconFallback {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.provider {
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  @include text-ellipsis;
+}
+
+.count {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 主窗口：标签 + 大数字 ---------- */
+
+.headlineLabel {
+  font-size: 13px;
+  color: var(--text-secondary);
+  @include text-ellipsis;
+}
+
+.figure {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.total {
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.capacity {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 每凭证一段的分段条 ---------- */
+
+.segments {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.segment {
+  flex: 1 1 0;
+  min-width: 6px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.segmentFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 360ms var(--ease-out-strong, ease);
+}
+
+.segmentHigh {
+  background: var(--viz-success);
+}
+
+.segmentMedium {
+  background: var(--quota-medium-color);
+}
+
+.segmentLow {
+  background: var(--viz-failure);
+}
+
+/* ---------- 最近重置 ---------- */
+
+.reset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resetRelative {
+  color: var(--text-secondary);
+}
+
+.resetAbsolute {
+  color: var(--text-tertiary);
+
+  &::before {
+    content: '·';
+    margin-right: 6px;
+  }
+}
+
+/* ---------- 次要窗口（折叠） ---------- */
+
+.secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-color);
+}
+
+.secondaryMore {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.secondaryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.secondaryLine {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.secondaryLabel {
+  color: var(--text-secondary);
+  @include text-ellipsis;
+}
+
+.secondaryValue {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.toggle {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  margin-right: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 1px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toggle:hover {
+    color: var(--text-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmentFill {
+    transition: none;
+  }
+}

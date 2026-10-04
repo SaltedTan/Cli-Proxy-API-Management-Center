@@ -21,5 +21,13 @@ export const QUOTA_SORT_MODES = ['default', 'soonest'] as const;
 
 export type QuotaSortMode = (typeof QUOTA_SORT_MODES)[number];
 
+/** 视图：ledger = 按提供商分组的行式账本（默认）；cards = 原卡片网格。 */
+export const QUOTA_VIEW_MODES = ['ledger', 'cards'] as const;
+
+export type QuotaViewMode = (typeof QUOTA_VIEW_MODES)[number];
+
+/** 账本每行最多铺开的窗口列数；其余窗口留在展开详情里。 */
+export const LEDGER_MAX_COLUMNS = 3;
+
 /** 与 useRevealGroup 的 GROUP_MAX_TOTAL 一致：卡片级联总预算 360ms。 */
 export const CARD_ENTRANCE_BUDGET_MS = 360;

@@ -77,8 +77,44 @@
 .actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+/* 描边药丸次按钮：与主按钮同尺寸，退居其后 */
+.secondaryAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-full;
+  background: none;
+  color: var(--text-secondary);
+  padding: 9px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    transform var(--dur-press, 160ms) var(--ease-out-strong, ease-out),
+    border-color var(--dur-hover, 200ms) var(--ease-out-strong, ease-out),
+    color var(--dur-hover, 200ms) var(--ease-out-strong, ease-out);
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .secondaryAction:hover {
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+  }
 }
 
 /* 墨色药丸主按钮（深色主题自动反相） */
@@ -141,15 +177,18 @@
 
   .actions {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primaryAction {
+  .primaryAction,
+  .secondaryAction {
     transition: none;
   }
 
-  .primaryAction:active:not(:disabled) {
+  .primaryAction:active:not(:disabled),
+  .secondaryAction:active {
     transform: none;
   }
 

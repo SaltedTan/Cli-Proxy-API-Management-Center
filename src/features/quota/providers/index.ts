@@ -10,21 +10,29 @@ import type { TFunction } from 'i18next';
 import { useQuotaStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import type { QuotaBodyProps } from '../types';
+import type { LedgerSnapshot } from '../ledgerModel';
 import type { QuotaProviderType, QuotaStore } from './types';
 import { ANTIGRAVITY_CONFIG } from './antigravity/data';
 import { AntigravityQuotaBody } from './antigravity/AntigravityQuotaBody';
+import { buildAntigravityLedger } from './antigravity/ledger';
 import { CLAUDE_CONFIG } from './claude/data';
 import { ClaudeQuotaBody } from './claude/ClaudeQuotaBody';
+import { buildClaudeLedger } from './claude/ledger';
 import { DEVIN_CONFIG } from './devin/data';
 import { DevinQuotaBody } from './devin/DevinQuotaBody';
+import { buildDevinLedger } from './devin/ledger';
 import { CODEX_CONFIG } from './codex/data';
 import { CodexQuotaBody } from './codex/CodexQuotaBody';
+import { buildCodexLedger } from './codex/ledger';
 import { META_CONFIG } from './meta/data';
 import { MetaQuotaBody } from './meta/MetaQuotaBody';
+import { buildMetaLedger } from './meta/ledger';
 import { KIMI_CONFIG } from './kimi/data';
 import { KimiQuotaBody } from './kimi/KimiQuotaBody';
+import { buildKimiLedger } from './kimi/ledger';
 import { XAI_CONFIG } from './xai/data';
 import { XaiQuotaBody } from './xai/XaiQuotaBody';
+import { buildXaiLedger } from './xai/ledger';
 
 /** 所有 provider 额度状态的公共骨架（各 *QuotaState 的结构子集）。 */
 export interface QuotaCardState {
@@ -47,19 +55,34 @@ export interface QuotaAdapter {
   buildSuccessState: (data: unknown) => QuotaCardState;
   buildErrorState: (message: string, status?: number) => QuotaCardState;
   Body: ComponentType<QuotaBodyProps<QuotaCardState>>;
+  /** Flat window view for the ledger; called only for `status === 'success'`. */
+  ledger: (quota: QuotaCardState, t: TFunction) => LedgerSnapshot;
 }
 
 export const QUOTA_ADAPTERS: Record<QuotaProviderType, QuotaAdapter> = {
   antigravity: {
     ...ANTIGRAVITY_CONFIG,
     Body: AntigravityQuotaBody,
+    ledger: buildAntigravityLedger,
   } as unknown as QuotaAdapter,
-  claude: { ...CLAUDE_CONFIG, Body: ClaudeQuotaBody } as unknown as QuotaAdapter,
-  codex: { ...CODEX_CONFIG, Body: CodexQuotaBody } as unknown as QuotaAdapter,
-  devin: { ...DEVIN_CONFIG, Body: DevinQuotaBody } as unknown as QuotaAdapter,
-  kimi: { ...KIMI_CONFIG, Body: KimiQuotaBody } as unknown as QuotaAdapter,
-  meta: { ...META_CONFIG, Body: MetaQuotaBody } as unknown as QuotaAdapter,
-  xai: { ...XAI_CONFIG, Body: XaiQuotaBody } as unknown as QuotaAdapter,
+  claude: {
+    ...CLAUDE_CONFIG,
+    Body: ClaudeQuotaBody,
+    ledger: buildClaudeLedger,
+  } as unknown as QuotaAdapter,
+  codex: {
+    ...CODEX_CONFIG,
+    Body: CodexQuotaBody,
+    ledger: buildCodexLedger,
+  } as unknown as QuotaAdapter,
+  devin: {
+    ...DEVIN_CONFIG,
+    Body: DevinQuotaBody,
+    ledger: buildDevinLedger,
+  } as unknown as QuotaAdapter,
+  kimi: { ...KIMI_CONFIG, Body: KimiQuotaBody, ledger: buildKimiLedger } as unknown as QuotaAdapter,
+  meta: { ...META_CONFIG, Body: MetaQuotaBody, ledger: buildMetaLedger } as unknown as QuotaAdapter,
+  xai: { ...XAI_CONFIG, Body: XaiQuotaBody, ledger: buildXaiLedger } as unknown as QuotaAdapter,
 };
 
 export type QuotaMapUpdater = (
