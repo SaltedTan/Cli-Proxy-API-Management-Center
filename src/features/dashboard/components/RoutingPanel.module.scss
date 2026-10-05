@@ -1,5 +1,42 @@
 @use '../../../styles/mixins' as *;
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+}
+
+.updated {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+// Button wraps its children in one span; lay the icon and label out inside it.
+.refresh > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spinning {
+  animation: routing-spin 0.8s linear infinite;
+}
+
+@keyframes routing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
+  }
+}
+
 .notice {
   margin: 0;
   padding: 10px 14px;

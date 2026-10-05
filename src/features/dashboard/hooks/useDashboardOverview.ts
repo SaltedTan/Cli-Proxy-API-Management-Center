@@ -170,6 +170,12 @@ export function useDashboardOverview() {
     ]);
   }, [connected, fetchConfig, loadAuthFiles, loadModels, refreshRecentRequests, refreshRouting]);
 
+  /** Scoped to the routing panel: its pool card is derived from auth-file cooldowns. */
+  const refreshRoutingPanel = useCallback(async () => {
+    if (!connected) return;
+    await Promise.allSettled([refreshRouting(), loadAuthFiles()]);
+  }, [connected, refreshRouting, loadAuthFiles]);
+
   const providerKeyCounts = useMemo(() => (config ? getProviderKeyCounts(config) : null), [config]);
 
   const { traffic, providers } = useMemo(() => {
@@ -298,5 +304,6 @@ export function useDashboardOverview() {
     authFiles,
     routing,
     refresh,
+    refreshRoutingPanel,
   };
 }

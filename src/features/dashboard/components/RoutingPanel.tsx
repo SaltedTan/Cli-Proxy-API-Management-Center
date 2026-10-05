@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
+import { IconRefreshCw } from '@/components/ui/icons';
 import {
   Table,
   TableBody,
@@ -54,15 +55,28 @@ export interface RoutingPanelProps {
   routing: RoutingObservabilityState;
   config: Config | null;
   authFiles: AuthFileItem[] | null;
+  /** Reloads this panel's data without the rest of the dashboard; omitted hides the button. */
+  onRefresh?: () => Promise<void>;
   /** Injected by tests; the live panel follows the shared clock. */
   nowMs?: number;
 }
 
-export function RoutingPanel({ routing, config, authFiles, nowMs }: RoutingPanelProps) {
+export function RoutingPanel({ routing, config, authFiles, onRefresh, nowMs }: RoutingPanelProps) {
   const { t, i18n } = useTranslation();
   const tickMs = useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
   const now = nowMs ?? tickMs;
   const [expanded, setExpanded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!onRefresh || refreshing) return;
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const live = routing.status === 'ready' ? routing.data : null;
   const homeMode = live?.mode === 'home';
@@ -165,9 +179,40 @@ export function RoutingPanel({ routing, config, authFiles, nowMs }: RoutingPanel
   const showSession = decisions.some((decision) => Boolean(decision.session));
   const transportTotal = live ? live.counters.transportWebsocket + live.counters.transportHttp : 0;
   const unknownProvider = t('dashboard.provider_unknown');
+  // A failed refresh keeps the last snapshot, so this time also shows when data went stale.
+  const observedAt = live?.observedAtMs ?? null;
 
   return (
     <div className={dash.panel}>
+      {(onRefresh || observedAt !== null) && (
+        <div className={styles.toolbar}>
+          {observedAt !== null && (
+            <span className={styles.updated}>
+              {t('dashboard.routing_updated_at', { time: formatTime(observedAt) })}
+            </span>
+          )}
+          {onRefresh && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className={styles.refresh}
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              aria-busy={refreshing}
+              aria-label={t('dashboard.routing_refresh_label')}
+              title={t('dashboard.routing_refresh_hint')}
+            >
+              <IconRefreshCw
+                size={14}
+                className={refreshing ? styles.spinning : undefined}
+                aria-hidden="true"
+              />
+              {t('common.refresh')}
+            </Button>
+          )}
+        </div>
+      )}
+
       {notice && (
         <p className={styles.notice} role="status">
           {notice}

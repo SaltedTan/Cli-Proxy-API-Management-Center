@@ -89,7 +89,11 @@ const authFiles = [
 
 const renderPanel = (
   routing: RoutingObservabilityState,
-  options: { config?: Config | null; files?: AuthFileItem[] | null } = {}
+  options: {
+    config?: Config | null;
+    files?: AuthFileItem[] | null;
+    onRefresh?: () => Promise<void>;
+  } = {}
 ) =>
   renderToStaticMarkup(
     createElement(
@@ -102,6 +106,7 @@ const renderPanel = (
           routing,
           config: options.config ?? null,
           authFiles: options.files === undefined ? authFiles : options.files,
+          onRefresh: options.onRefresh,
           nowMs: NOW,
         })
       )
@@ -422,6 +427,49 @@ describe('routing panel rendering', () => {
     const home = renderPanel(ready({ mode: 'home' }));
     expect(home).toContain(t('dashboard.routing_notice_home'));
     expect(home).not.toContain('<table');
+  });
+});
+
+describe('routing panel refresh', () => {
+  const refreshButton = /<button[^>]*aria-label="Refresh credential selection"[^>]*>/;
+  const onRefresh = async () => undefined;
+
+  test('offers a scoped refresh and shows when the snapshot was observed', () => {
+    const markup = renderPanel(
+      { status: 'ready', data: normalizeRoutingObservability(rawSnapshot) },
+      { onRefresh }
+    );
+    const button = markup.match(refreshButton)?.[0];
+    expect(button).toBeDefined();
+    expect(button).toContain('aria-busy="false"');
+    expect(button).not.toContain('disabled');
+    expect(button).toContain(`title="${t('dashboard.routing_refresh_hint')}"`);
+    const observed = new Date(Date.parse('2026-10-04T10:00:00Z')).toLocaleTimeString('en', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    expect(markup).toContain(t('dashboard.routing_updated_at', { time: observed }));
+  });
+
+  test('keeps the refresh available when live data is missing', () => {
+    // The pool card still reloads from auth files, and an upgraded backend may now answer.
+    const markup = renderPanel({ status: 'unsupported', data: null }, { onRefresh });
+    expect(markup).toMatch(refreshButton);
+    expect(markup).not.toContain('Updated ');
+  });
+
+  test('hides the button when no refresh handler is provided', () => {
+    const markup = renderPanel({ status: 'unsupported', data: null });
+    expect(markup).not.toMatch(refreshButton);
+  });
+
+  test('the dashboard reloads routing and auth files without a full refresh', async () => {
+    const source = await Bun.file(
+      new URL('../src/features/dashboard/hooks/useDashboardOverview.ts', import.meta.url)
+    ).text();
+    const scoped = source.slice(source.indexOf('const refreshRoutingPanel'));
+    expect(scoped).toContain('Promise.allSettled([refreshRouting(), loadAuthFiles()])');
   });
 });
 

@@ -53,6 +53,7 @@ export function DashboardPage() {
     authFiles,
     routing,
     refresh,
+    refreshRoutingPanel,
   } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
@@ -421,7 +422,12 @@ export function DashboardPage() {
           <h2 className={styles.sectionTitle}>{t('dashboard.routing_title')}</h2>
           <p className={styles.sectionDescription}>{t('dashboard.routing_description')}</p>
         </header>
-        <RoutingPanel routing={routing} config={config} authFiles={authFiles} />
+        <RoutingPanel
+          routing={routing}
+          config={config}
+          authFiles={authFiles}
+          onRefresh={connected ? refreshRoutingPanel : undefined}
+        />
       </section>
 
       {/* ---------- Credential health + runtime ---------- */}
