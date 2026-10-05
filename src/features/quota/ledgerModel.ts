@@ -11,6 +11,8 @@
  * (`providers/<type>/ledger.ts`) and `nowMs` is always passed in.
  */
 
+import { computeWindowPace, type PaceCounts } from './paceModel';
+
 /** One quota window, normalized to "percent remaining". */
 export interface LedgerWindow {
   /** Stable within a provider, so rows can line up in shared columns. */
@@ -23,6 +25,12 @@ export interface LedgerWindow {
   resetLabel: string | null;
   /** Window length in hours; orders the summary's secondary lines. */
   periodHours: number | null;
+  /**
+   * The client guessed `periodHours` (a billing month taken as 30 days) rather
+   * than reading it from the payload. Good enough to order columns; not good
+   * enough to pace against, so such windows get no pace.
+   */
+  periodEstimated?: boolean;
 }
 
 export interface LedgerSnapshot {
@@ -114,6 +122,8 @@ export interface ProviderSummaryLine {
   nextResetMs: number | null;
   /** Loaded credentials that report this window. */
   coverage: number;
+  /** Credentials per pace verdict; windows without a known pace are not counted. */
+  pace: PaceCounts;
 }
 
 export interface ProviderSummary {
@@ -151,6 +161,7 @@ export function summarizeProvider(
     let nextResetMs: number | null = null;
     let coverage = 0;
     const segments: (number | null)[] = [];
+    const pace: PaceCounts = { over: 0, on: 0, under: 0 };
     for (const snapshot of snapshots) {
       if (snapshot === null) {
         segments.push(null);
@@ -161,6 +172,8 @@ export function summarizeProvider(
       coverage += 1;
       segments.push(window.remaining);
       if (window.remaining !== null) total = (total ?? 0) + window.remaining;
+      const windowPace = computeWindowPace(window, nowMs);
+      if (windowPace.status !== 'unknown') pace[windowPace.status] += 1;
       if (
         window.resetAtMs !== null &&
         window.resetAtMs > nowMs &&
@@ -177,6 +190,7 @@ export function summarizeProvider(
       segments,
       nextResetMs,
       coverage,
+      pace,
     };
   });
 

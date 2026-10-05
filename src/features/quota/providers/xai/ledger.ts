@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { XaiQuotaState } from '@/types';
 import { parseIsoToMs } from '@/utils/quota';
+import { HOUR_MS } from '@/utils/time/durations';
 import { remainingFromUsed, usableMs } from '../../ledgerModel';
 import type { LedgerSnapshot, LedgerWindow } from '../../ledgerModel';
 import { resolveXaiPlan } from './plan';
@@ -43,13 +44,21 @@ export function buildXaiLedger(quota: XaiQuotaState, t: TFunction): LedgerSnapsh
       Boolean(billing.billingPeriodEnd)) &&
     !(hasWeeklyData && billing.monthlyLimitCents === 0 && billing.usedCents === 0);
   if (hasMonthlyData) {
+    const resetAtMs = parseIsoToMs(billing.billingPeriodEnd);
+    const startMs = parseIsoToMs(billing.billingPeriodStart);
+    // Billing months run 28–31 days: only the reported span is exact enough to pace.
+    const reportedHours =
+      resetAtMs !== null && startMs !== null && resetAtMs > startMs
+        ? (resetAtMs - startMs) / HOUR_MS
+        : null;
     windows.push({
       id: 'monthly',
       label: t('xai_quota.monthly_credits'),
       remaining: remainingFromUsed(billing.usedPercent),
-      resetAtMs: parseIsoToMs(billing.billingPeriodEnd),
+      resetAtMs,
       resetLabel: null,
-      periodHours: 24 * 30,
+      periodHours: reportedHours ?? 24 * 30,
+      periodEstimated: reportedHours === null,
     });
   }
 

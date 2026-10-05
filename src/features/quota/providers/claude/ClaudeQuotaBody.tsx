@@ -8,6 +8,7 @@ import type { ClaudeQuotaState } from '@/types';
 import { buildResetDisplay } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
@@ -73,7 +74,10 @@ export function ClaudeQuotaBody({ quota, classes }: QuotaBodyProps<ClaudeQuotaSt
                   )}
                 </div>
               </div>
-              <QuotaMeter percent={remaining} classes={classes} index={index} />
+              <PacedMeter paceId={window.id}>
+                <QuotaMeter percent={remaining} classes={classes} index={index} />
+              </PacedMeter>
+              <QuotaRowPace paceId={window.id} />
             </div>
           );
         })

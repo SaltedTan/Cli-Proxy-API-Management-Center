@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { AntigravityQuotaState } from '@/types';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
 import { getNextAntigravityCountdownUpdateDelay } from './countdown';
@@ -17,6 +18,7 @@ import {
   translateAntigravityQuotaDescription,
   translateAntigravityQuotaLabel,
 } from './labels';
+import { antigravityWindowId } from './ledger';
 
 const formatAntigravityDuration = (t: TFunction, deltaMs: number): string => {
   const totalMinutes = Math.max(1, Math.ceil(deltaMs / 60000));
@@ -157,6 +159,7 @@ export function AntigravityQuotaBody({ quota, classes }: QuotaBodyProps<Antigrav
                 );
 
                 const soon = bucket.id === soonestRowId;
+                const paceId = antigravityWindowId(group.id, bucket.id);
 
                 return (
                   <div key={bucket.id} className={classes.quotaRow}>
@@ -178,7 +181,10 @@ export function AntigravityQuotaBody({ quota, classes }: QuotaBodyProps<Antigrav
                         </span>
                       </div>
                     </div>
-                    <QuotaMeter percent={percent} classes={classes} index={index} />
+                    <PacedMeter paceId={paceId}>
+                      <QuotaMeter percent={percent} classes={classes} index={index} />
+                    </PacedMeter>
+                    <QuotaRowPace paceId={paceId} />
                   </div>
                 );
               })}

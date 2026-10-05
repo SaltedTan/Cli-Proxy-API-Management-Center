@@ -144,6 +144,12 @@
   }
 }
 
+/* 节奏判词（样式见 QuotaPace.module.scss）：与上一行重置时间同字号。
+ * 嵌套提高特异性，不依赖两个模块在产物里的先后顺序。 */
+.cell .cellPace {
+  font-size: 12.5px;
+}
+
 /* idle / loading / error / 空消息：横跨所有窗口列 */
 .span {
   grid-column: 2 / span var(--ledger-cols, 1);

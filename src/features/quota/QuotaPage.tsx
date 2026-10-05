@@ -515,6 +515,7 @@ export function QuotaPage() {
                 key={entryKey(entry)}
                 entry={entry}
                 quota={getQuota(entry)}
+                snapshot={snapshotFor(entry)}
                 resolvedTheme={resolvedTheme}
                 maskEmails={!showEmails}
                 canRefresh={canUseActions && !entry.file.disabled}

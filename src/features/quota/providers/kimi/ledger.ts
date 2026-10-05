@@ -24,6 +24,7 @@ export function buildKimiLedger(quota: KimiQuotaState, t: TFunction): LedgerSnap
         resetAtMs,
         resetLabel: resetAtMs === null ? formatKimiResetHint(t, row.resetHint) : null,
         periodHours: row.periodHours ?? null,
+        periodEstimated: row.periodEstimated,
       };
     }),
   };

@@ -9,6 +9,7 @@ import type { XaiBillingSummary, XaiQuotaState } from '@/types';
 import { buildResetDisplay, formatQuotaResetTime, parseIsoToMs } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { XAI_WEEKLY_ROW_ID, collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
@@ -201,9 +202,13 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
               )}
             </div>
           </div>
+          {/* Pace ids are the ledger's window ids (xai/ledger.ts). */}
           {weeklyRemaining !== null && (
-            <QuotaMeter percent={weeklyRemaining} classes={classes} index={0} />
+            <PacedMeter paceId="weekly">
+              <QuotaMeter percent={weeklyRemaining} classes={classes} index={0} />
+            </PacedMeter>
           )}
+          <QuotaRowPace paceId="weekly" />
         </div>
       )}
       {billing.productUsage.map((item, index) => {
@@ -261,11 +266,14 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
               )}
             </div>
           </div>
-          <QuotaMeter
-            percent={remaining}
-            classes={classes}
-            index={billing.productUsage.length + 2}
-          />
+          <PacedMeter paceId="monthly">
+            <QuotaMeter
+              percent={remaining}
+              classes={classes}
+              index={billing.productUsage.length + 2}
+            />
+          </PacedMeter>
+          <QuotaRowPace paceId="monthly" />
         </div>
       )}
     </>

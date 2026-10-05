@@ -96,6 +96,47 @@ export function bindQuotaClasses(module: Record<string, string>, source: string)
   return bound;
 }
 
+/**
+ * 节奏刻度与判词的类名契约。body 不引样式表，由宿主（额度页卡片 / 账本）经
+ * QuotaPaceProvider 提供；认证文件卡片不提供，行即不显示节奏。
+ */
+export interface PaceClassMap {
+  meter: string;
+  paceMark: string;
+  pace: string;
+  paceDot: string;
+  paceText: string;
+  paceOver: string;
+  paceOn: string;
+  paceUnder: string;
+  paceUsedUp: string;
+  srOnly: string;
+}
+
+const PACE_CLASS_KEYS: readonly (keyof PaceClassMap)[] = [
+  'meter',
+  'paceMark',
+  'pace',
+  'paceDot',
+  'paceText',
+  'paceOver',
+  'paceOn',
+  'paceUnder',
+  'paceUsedUp',
+  'srOnly',
+];
+
+/** 宿主 CSS Module → 节奏类名（QuotaPace.tsx 的刻度与判词）。同样缺键即抛。 */
+export function bindPaceClasses(module: Record<string, string>, source: string): PaceClassMap {
+  const missing = PACE_CLASS_KEYS.filter((key) => !module[key]);
+  if (missing.length > 0) {
+    throw new Error(`[quota] ${source} is missing pace classes: ${missing.join(', ')}`);
+  }
+  return Object.fromEntries(
+    PACE_CLASS_KEYS.map((key) => [key, module[key]])
+  ) as unknown as PaceClassMap;
+}
+
 export interface QuotaBodyProps<TState> {
   quota: TState;
   classes: QuotaClassMap;

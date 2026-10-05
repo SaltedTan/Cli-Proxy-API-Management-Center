@@ -4,6 +4,7 @@ import type { MetaQuotaState } from '@/types';
 import { useNow } from '@/hooks/useNow';
 import { buildResetDisplay } from '@/utils/quota';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
@@ -73,8 +74,11 @@ export function MetaQuotaBody({ quota, classes }: QuotaBodyProps<MetaQuotaState>
               aria-valuemax={remaining === null ? undefined : 100}
               aria-valuenow={remaining ?? undefined}
             >
-              <QuotaMeter percent={remaining} classes={classes} index={index} />
+              <PacedMeter paceId={window.id}>
+                <QuotaMeter percent={remaining} classes={classes} index={index} />
+              </PacedMeter>
             </div>
+            <QuotaRowPace paceId={window.id} />
           </div>
         );
       })}

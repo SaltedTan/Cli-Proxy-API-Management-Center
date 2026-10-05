@@ -164,6 +164,39 @@
   }
 }
 
+/* ---------- 节奏计数（主窗口） ---------- */
+
+.pace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.paceLabel {
+  color: var(--text-tertiary);
+}
+
+.paceCount,
+.paceOver {
+  &::before {
+    content: '·';
+    margin-right: 6px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+  }
+}
+
+.paceCount {
+  color: var(--text-secondary);
+}
+
+.paceOver {
+  color: var(--amber-color);
+  font-weight: 600;
+}
+
 /* ---------- 次要窗口（折叠） ---------- */
 
 .secondary {

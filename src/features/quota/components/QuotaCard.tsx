@@ -8,6 +8,8 @@
  *
  * body + footer 拆为 QuotaCardContent：账本视图的行展开详情复用同一份
  * provider 细节与重置动作，不重复实现。
+ *
+ * 传入账本快照时，body 的每个窗口行带上节奏刻度与判词（见 QuotaPace.tsx）。
  */
 
 import { useState, type CSSProperties } from 'react';
@@ -23,19 +25,25 @@ import {
   getTypeLabel,
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
-import { bindQuotaClasses } from '../types';
+import { bindPaceClasses, bindQuotaClasses } from '../types';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
+import type { LedgerSnapshot } from '../ledgerModel';
+import { QuotaPaceProvider } from './QuotaPace';
 import bodyStyles from './QuotaBody.module.scss';
 import styles from './QuotaCard.module.scss';
+import paceModule from './QuotaPace.module.scss';
 
 /** 额度页全页外衣：QuotaBody 模块绑定成类型化契约（缺键在模块初始化即抛）。 */
 const quotaClasses = bindQuotaClasses(bodyStyles, 'QuotaBody.module.scss');
+const paceStyles = bindPaceClasses(paceModule, 'QuotaPace.module.scss');
 
 export type QuotaCardContentProps = {
   entry: QuotaFileEntry;
   quota?: QuotaCardState;
+  /** Ledger view of a loaded quota; supplies the body rows' pace. */
+  snapshot?: LedgerSnapshot | null;
   canRefresh: boolean;
   resetting: boolean;
   onRefresh: () => void;
@@ -101,7 +109,16 @@ export function QuotaCard(props: QuotaCardProps) {
 }
 
 export function QuotaCardContent(props: QuotaCardContentProps) {
-  const { entry, quota, canRefresh, resetting, onRefresh, onReset, showRefresh = true } = props;
+  const {
+    entry,
+    quota,
+    snapshot = null,
+    canRefresh,
+    resetting,
+    onRefresh,
+    onReset,
+    showRefresh = true,
+  } = props;
   const { t } = useTranslation();
   const adapter = QUOTA_ADAPTERS[entry.type];
   const file = entry.file;
@@ -170,7 +187,9 @@ export function QuotaCardContent(props: QuotaCardContentProps) {
             {t(`${adapter.i18nPrefix}.load_failed`, { message: errorMessage })}
           </div>
         ) : quota ? (
-          <adapter.Body quota={quota} classes={quotaClasses} />
+          <QuotaPaceProvider snapshot={snapshot} classes={paceStyles}>
+            <adapter.Body quota={quota} classes={quotaClasses} />
+          </QuotaPaceProvider>
         ) : (
           <div className={styles.idleHint}>{t(`${adapter.i18nPrefix}.idle`)}</div>
         )}

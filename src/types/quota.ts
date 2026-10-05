@@ -365,6 +365,8 @@ export interface KimiQuotaRow {
   resetAtMs?: number | null;
   /** Window length in hours, derived from explicit duration metadata or the limit scope. */
   periodHours?: number | null;
+  /** `periodHours` is a "monthly" label taken as 30 days, not duration metadata. */
+  periodEstimated?: boolean;
 }
 
 export interface KimiQuotaState {

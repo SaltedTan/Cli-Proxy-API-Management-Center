@@ -22,15 +22,19 @@ import { LEDGER_MAX_COLUMNS } from '../constants';
 import { buildLedgerColumns, type LedgerColumn, type LedgerSnapshot } from '../ledgerModel';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { maskEmailsInText } from '../maskEmail';
+import { computeWindowPace } from '../paceModel';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import type { QuotaProviderType } from '../providers/types';
-import { bindQuotaClasses } from '../types';
+import { bindPaceClasses, bindQuotaClasses } from '../types';
 import { QuotaCardContent } from './QuotaCard';
 import { QuotaMeter } from './QuotaMeter';
+import { PaceMark, PaceVerdict } from './QuotaPace';
 import bodyStyles from './QuotaBody.module.scss';
 import styles from './QuotaLedger.module.scss';
+import paceModule from './QuotaPace.module.scss';
 
 const quotaClasses = bindQuotaClasses(bodyStyles, 'QuotaBody.module.scss');
+const paceStyles = bindPaceClasses(paceModule, 'QuotaPace.module.scss');
 
 export interface QuotaLedgerProps {
   entries: QuotaFileEntry[];
@@ -249,6 +253,7 @@ function LedgerRow({
             <QuotaCardContent
               entry={entry}
               quota={quota}
+              snapshot={snapshot}
               canRefresh={canRefresh}
               resetting={resetting}
               onRefresh={() => onRefresh(entry)}
@@ -278,6 +283,8 @@ function WindowCell({
   const reset = buildResetDisplay(window.resetLabel, window.resetAtMs, now, i18n.resolvedLanguage);
   const urgent =
     window.resetAtMs !== null && window.resetAtMs > now && window.resetAtMs - now < HOUR_MS;
+  const pace = computeWindowPace(window, now);
+  const knownPace = pace.status === 'unknown' ? null : pace;
 
   return (
     <div className={styles.cell}>
@@ -289,7 +296,10 @@ function WindowCell({
           {window.remaining === null ? '--' : `${Math.round(window.remaining)}%`}
         </span>
       </div>
-      <QuotaMeter percent={window.remaining} classes={quotaClasses} index={index} />
+      <div className={paceStyles.meter}>
+        <QuotaMeter percent={window.remaining} classes={quotaClasses} index={index} />
+        {knownPace && <PaceMark pace={knownPace} classes={paceStyles} />}
+      </div>
       <div className={styles.cellReset}>
         {reset === null ? (
           <span className={styles.resetAbsolute}>{t('quota_management.no_reset_pending')}</span>
@@ -306,6 +316,15 @@ function WindowCell({
           </>
         )}
       </div>
+      {knownPace && window.remaining !== null && (
+        <PaceVerdict
+          pace={knownPace}
+          remaining={window.remaining}
+          now={now}
+          classes={paceStyles}
+          className={styles.cellPace}
+        />
+      )}
     </div>
   );
 }

@@ -3,7 +3,8 @@
  *
  * Each cell pools the provider's headline window across its credentials
  * ("409% of 500%"), draws one segment per credential so a single exhausted
- * account stays visible inside a healthy total, and names the soonest reset.
+ * account stays visible inside a healthy total, names the soonest reset and
+ * tallies how many credentials spend that window over, on or under pace.
  * Secondary windows fold behind a toggle — the strip is for orientation, the
  * ledger below is for detail.
  */
@@ -19,6 +20,7 @@ import {
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
 import type { ProviderSummary, ProviderSummaryLine } from '../ledgerModel';
+import type { PaceCounts } from '../paceModel';
 import type { QuotaProviderType } from '../providers/types';
 import { QUOTA_PROGRESS_HIGH_THRESHOLD, QUOTA_PROGRESS_MEDIUM_THRESHOLD } from './QuotaMeter';
 import styles from './QuotaSummaryStrip.module.scss';
@@ -134,6 +136,8 @@ function SummaryCell({
         <ResetLine atMs={headline.nextResetMs} now={now} locale={i18n.resolvedLanguage} />
       )}
 
+      {headline && <PaceLine pace={headline.pace} />}
+
       {firstSecondary && (
         <div className={styles.secondary}>
           <div className={styles.secondaryRow}>
@@ -183,6 +187,25 @@ function ResetLine({ atMs, now, locale }: { atMs: number; now: number; locale?: 
     <div className={styles.reset}>
       <span className={styles.resetRelative}>{formatRelativeInstant(atMs, now, locale)}</span>
       <span className={styles.resetAbsolute}>{formatInstantShort(atMs)}</span>
+    </div>
+  );
+}
+
+const PACE_ORDER: readonly (keyof PaceCounts)[] = ['over', 'on', 'under'];
+
+/** Per-credential pace tally for the headline window; nothing when no pace is known. */
+function PaceLine({ pace }: { pace: PaceCounts }) {
+  const { t } = useTranslation();
+  const parts = PACE_ORDER.filter((status) => pace[status] > 0);
+  if (parts.length === 0) return null;
+  return (
+    <div className={styles.pace}>
+      <span className={styles.paceLabel}>{t('quota_management.pace_summary_label')}</span>
+      {parts.map((status) => (
+        <span key={status} className={status === 'over' ? styles.paceOver : styles.paceCount}>
+          {t(`quota_management.pace_count_${status}`, { count: pace[status] })}
+        </span>
+      ))}
     </div>
   );
 }

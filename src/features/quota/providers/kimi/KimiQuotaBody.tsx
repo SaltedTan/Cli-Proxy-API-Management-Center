@@ -8,6 +8,7 @@ import type { KimiQuotaState } from '@/types';
 import { buildResetDisplay, formatKimiResetHint } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
@@ -64,7 +65,10 @@ export function KimiQuotaBody({ quota, classes }: QuotaBodyProps<KimiQuotaState>
                 )}
               </div>
             </div>
-            <QuotaMeter percent={remaining} classes={classes} index={index} />
+            <PacedMeter paceId={row.id}>
+              <QuotaMeter percent={remaining} classes={classes} index={index} />
+            </PacedMeter>
+            <QuotaRowPace paceId={row.id} />
           </div>
         );
       })}

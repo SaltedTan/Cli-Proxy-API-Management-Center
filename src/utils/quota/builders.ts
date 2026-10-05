@@ -262,6 +262,9 @@ function kimiResetMs(data: Record<string, unknown>): number | null {
 }
 
 /** Window length in hours from explicit duration metadata, then label/scope. */
+/** A "monthly" label read as a fixed 30 days — calendar months run 28–31. */
+const KIMI_LABEL_MONTH_HOURS = 24 * 30;
+
 function kimiPeriodHours(
   label: string | undefined,
   duration: number | null = null,
@@ -280,7 +283,7 @@ function kimiPeriodHours(
   const text = (label ?? '').toLowerCase();
   if (text.includes('daily') || text.includes('day')) return 24;
   if (text.includes('weekly') || text.includes('week')) return 24 * 7;
-  if (text.includes('monthly') || text.includes('month')) return 24 * 30;
+  if (text.includes('monthly') || text.includes('month')) return KIMI_LABEL_MONTH_HOURS;
   if (text.includes('5h') || text.includes('hour')) return 5;
   return null;
 }
@@ -297,6 +300,7 @@ function toKimiUsageRow(
       resetHint?: string;
       resetAtMs?: number | null;
       periodHours?: number | null;
+      periodEstimated?: boolean;
     })
   | null {
   const limit = toInt(data.limit);
@@ -312,17 +316,20 @@ function toKimiUsageRow(
     (typeof data.name === 'string' && data.name.trim()) ||
     (typeof data.title === 'string' && data.title.trim());
   const label = explicitLabel ? { label: explicitLabel } : fallbackLabel;
+  const hasDuration = duration !== null && duration > 0;
+  const periodHours = kimiPeriodHours(
+    explicitLabel || fallbackLabel.label || fallbackLabel.labelKey,
+    duration,
+    timeUnit
+  );
   return {
     ...label,
     used: used ?? 0,
     limit: limit ?? 0,
     resetHint: kimiResetHint(data),
     resetAtMs: kimiResetMs(data),
-    periodHours: kimiPeriodHours(
-      explicitLabel || fallbackLabel.label || fallbackLabel.labelKey,
-      duration,
-      timeUnit
-    ),
+    periodHours,
+    periodEstimated: !hasDuration && periodHours === KIMI_LABEL_MONTH_HOURS,
   };
 }
 
@@ -458,12 +465,11 @@ export function resolveXaiSubscriptionPlan(
   const label = normalizeStringValue(display) ?? normalizeStringValue(tier);
   if (!label) return null;
   const key = `${display ?? ''} ${tier ?? ''}`.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const planTier =
-    key.includes('heavy')
-      ? 'elite'
-      : key.includes('supergrok') || key.includes('premium')
-        ? 'premium'
-        : 'standard';
+  const planTier = key.includes('heavy')
+    ? 'elite'
+    : key.includes('supergrok') || key.includes('premium')
+      ? 'premium'
+      : 'standard';
   return { label, tier: planTier };
 }
 
