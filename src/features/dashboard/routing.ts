@@ -164,7 +164,9 @@ const hostOf = (baseUrl: string | undefined): string => {
 
 /**
  * Maps auth indexes to display names. Auth files use their account email or file
- * name; configured keys use their provider, prefix or base URL host, plus their
+ * name; when several share that name (one email in several teams), each gets its
+ * organization name, or a short auth index when that does not tell them apart.
+ * Configured keys use their provider, prefix or base URL host, plus their
  * position when a group holds several keys. API key values are never used as labels.
  */
 export function buildCredentialLabels(
@@ -180,8 +182,32 @@ export function buildCredentialLabels(
   const numbered = (label: string, position: number, size: number) =>
     size > 1 ? `${label} #${position + 1}` : label;
 
-  (files ?? []).forEach((file) => {
-    add(file.authIndex, String(file.email ?? '').trim() || file.name);
+  const fileEntries = (files ?? []).map((file) => ({
+    authIndex: normalizeAuthIndex(file.authIndex),
+    base: String(file.email ?? '').trim() || file.name,
+    organization: String(file.organizationName ?? '').trim(),
+  }));
+  const tally = (keys: string[]) => {
+    const counts = new Map<string, number>();
+    keys.forEach((key) => counts.set(key, (counts.get(key) ?? 0) + 1));
+    return counts;
+  };
+  const baseCounts = tally(fileEntries.map(({ base }) => base.toLowerCase()));
+  const organizationCounts = tally(
+    fileEntries.map(({ base, organization }) => `${base}\0${organization}`.toLowerCase())
+  );
+  fileEntries.forEach(({ authIndex, base, organization }) => {
+    if ((baseCounts.get(base.toLowerCase()) ?? 0) < 2) {
+      add(authIndex, base);
+      return;
+    }
+    const sharedOrganization =
+      !organization || (organizationCounts.get(`${base}\0${organization}`.toLowerCase()) ?? 0) > 1;
+    const qualifiers = [
+      organization,
+      sharedOrganization && authIndex ? `#${shortAuthIndex(authIndex)}` : '',
+    ].filter(Boolean);
+    add(authIndex, qualifiers.length > 0 ? `${base} · ${qualifiers.join(' · ')}` : base);
   });
 
   if (config) {

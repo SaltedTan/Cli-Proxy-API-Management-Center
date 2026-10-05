@@ -287,6 +287,50 @@ describe('routing diagnostics', () => {
     expect([...labels.values()].join(' ')).not.toContain('sk-secret');
   });
 
+  test('tells apart credentials that share one email across teams', () => {
+    const files = [
+      {
+        name: 'claude-1.json',
+        email: 'sam@example.com',
+        authIndex: 'idx_1',
+        organizationName: 'Alpha',
+      },
+      {
+        name: 'claude-2.json',
+        email: 'sam@example.com',
+        authIndex: 'idx_2',
+        organizationName: 'Beta',
+      },
+      { name: 'claude-3.json', email: 'SAM@example.com', authIndex: 'idx_3_long_index' },
+      {
+        name: 'claude-4.json',
+        email: 'kit@example.com',
+        authIndex: 'idx_4',
+        organizationName: 'Alpha',
+      },
+      {
+        name: 'codex-a.json',
+        email: 'lee@example.com',
+        authIndex: 'idx_5',
+        organizationName: 'Same',
+      },
+      {
+        name: 'codex-b.json',
+        email: 'lee@example.com',
+        authIndex: 'idx_6',
+        organizationName: 'Same',
+      },
+    ] as AuthFileItem[];
+    const labels = buildCredentialLabels(files, null);
+    expect(labels.get('idx_1')).toBe('sam@example.com · Alpha');
+    expect(labels.get('idx_2')).toBe('sam@example.com · Beta');
+    expect(labels.get('idx_3_long_index')).toBe('SAM@example.com · #idx_3_lo');
+    // A unique email stays bare even when it carries an organization.
+    expect(labels.get('idx_4')).toBe('kit@example.com');
+    expect(labels.get('idx_5')).toBe('lee@example.com · Same · #idx_5');
+    expect(labels.get('idx_6')).toBe('lee@example.com · Same · #idx_6');
+  });
+
   test('derives reuse rate, quota reasons and exact TTL text', () => {
     const { counters } = normalizeRoutingObservability(rawSnapshot);
     expect(affinityReuseRate(counters)).toBe(90);

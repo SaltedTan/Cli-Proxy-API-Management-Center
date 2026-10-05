@@ -67,6 +67,19 @@ describe('auth-files response normalization', () => {
     expect(result.files[0]?.project_id).toBe(' my-proj ');
   });
 
+  test('normalizes organization_name to organizationName while keeping the raw key', () => {
+    const result = normalizeAuthFilesResponse(
+      responseWithRawFiles([
+        { name: 'claude-a.json', organization_name: ' Team A ' },
+        { name: 'claude-b.json', organization_name: '  ' },
+      ])
+    );
+
+    expect(result.files[0]?.organizationName).toBe('Team A');
+    expect(result.files[0]?.organization_name).toBe(' Team A ');
+    expect(result.files[1]?.organizationName).toBeUndefined();
+  });
+
   test('recovers a non-empty email from the lower-priority duplicate entry', () => {
     const result = normalizeAuthFilesResponse(
       responseWithRawFiles([

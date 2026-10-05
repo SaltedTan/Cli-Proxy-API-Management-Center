@@ -53,6 +53,8 @@ export interface AuthFileItem {
   email?: string;
   /** GCP / Vertex 项目 ID，账号邮箱缺失时作为身份回落。 */
   projectId?: string;
+  /** 凭证所属组织（团队）名；同一邮箱加入多个团队时靠它区分。 */
+  organizationName?: string;
   size?: number;
   authIndex?: string | number | null;
   runtimeOnly?: boolean | string;
