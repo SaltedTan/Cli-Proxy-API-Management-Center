@@ -11,6 +11,8 @@
  * (`providers/<type>/ledger.ts`) and `nowMs` is always passed in.
  */
 
+import type { QuotaWindowScope } from '@/types';
+import { buildQuotaLanes, isModelWindow, type QuotaLane } from './laneModel';
 import { computeWindowPace, type PaceCounts } from './paceModel';
 
 /** One quota window, normalized to "percent remaining". */
@@ -31,12 +33,29 @@ export interface LedgerWindow {
    * enough to pace against, so such windows get no pace.
    */
   periodEstimated?: boolean;
+  /** What an exhausted window stops; absent for providers that don't say. */
+  scope?: QuotaWindowScope;
+  /** Display name of the model a scoped window limits — such a window gets a ledger lane. */
+  model?: string | null;
+}
+
+/**
+ * A routing pause the proxy holds on the credential (one of its cooldowns),
+ * anchored to the local clock when the auth-file list arrived.
+ */
+export interface LedgerPause {
+  scope: 'credential' | 'model';
+  /** The paused model's key for model-scoped pauses, e.g. `claude-fable-5-1`. */
+  modelKey: string | null;
+  untilMs: number;
 }
 
 export interface LedgerSnapshot {
   plan: string | null;
   /** Headline window first. */
   windows: LedgerWindow[];
+  /** The proxy's active pauses on this credential; joined in from the auth-file list. */
+  pauses?: LedgerPause[];
 }
 
 export const EMPTY_LEDGER: LedgerSnapshot = { plan: null, windows: [] };
@@ -77,6 +96,8 @@ export interface LedgerColumn {
   id: string;
   label: string;
   periodHours: number | null;
+  scope?: QuotaWindowScope;
+  model?: string | null;
 }
 
 /**
@@ -96,6 +117,8 @@ export function buildLedgerColumns(snapshots: readonly (LedgerSnapshot | null)[]
           id: window.id,
           label: window.label,
           periodHours: window.periodHours,
+          ...(window.scope ? { scope: window.scope } : {}),
+          ...(window.model ? { model: window.model } : {}),
         });
       }
     }
@@ -126,10 +149,26 @@ export interface ProviderSummaryLine {
   pace: PaceCounts;
 }
 
+/** A model's own limit, pooled, plus whether its lanes can take a request now. */
+export interface ProviderModelSummary {
+  line: ProviderSummaryLine;
+  model: string;
+  /** Loaded credentials that carry this model's limit. */
+  carrying: number;
+  /** Of those, how many could serve the model right now (lane open or running short). */
+  serving: number;
+  /** Of those, how many are projected to stop before their refill. */
+  short: number;
+  /** The earliest projected stop among them. */
+  firstStopMs: number | null;
+}
+
 export interface ProviderSummary {
   credentialCount: number;
   loadedCount: number;
   headline: ProviderSummaryLine | null;
+  /** Model-scoped limits that get a lane in the ledger, in column order. */
+  models: ProviderModelSummary[];
   /** Remaining columns, longest window first. */
   secondary: ProviderSummaryLine[];
 }
@@ -146,7 +185,12 @@ export interface ProviderSummary {
  * broken by column order. A limit only some accounts carry (Claude's
  * model-scoped weekly window on a subset of subscriptions) would otherwise
  * headline a pool that leaves most of the provider out; it stays visible as a
- * secondary line instead.
+ * secondary line instead. Scoped windows never headline while an account-wide
+ * one exists: the headline pools a limit that gates every request.
+ *
+ * A model-scoped window (one with a ledger lane) is summarized as a model block
+ * rather than a secondary line, so it can say how many credentials could serve
+ * the model now — which its own percentage cannot (see laneModel.ts).
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],
@@ -194,19 +238,49 @@ export function summarizeProvider(
     };
   });
 
+  const columnFor = (line: ProviderSummaryLine) => columns.find((column) => column.id === line.id);
+  const accountWide = lines.filter((line) => columnFor(line)?.scope !== 'scoped');
   // First line with the widest coverage; reduce keeps the earlier one on ties.
-  const headline = lines.reduce<ProviderSummaryLine | null>(
+  const headline = (
+    accountWide.length > 0 ? accountWide : lines
+  ).reduce<ProviderSummaryLine | null>(
     (best, line) => (best === null || line.coverage > best.coverage ? line : best),
     null
   );
-  const period = (line: ProviderSummaryLine) =>
-    columns.find((column) => column.id === line.id)?.periodHours ?? 0;
+
+  const lanesBySnapshot = snapshots.map((snapshot) =>
+    snapshot === null ? [] : buildQuotaLanes(snapshot, nowMs)
+  );
+  const models = lines
+    .filter((line) => line !== headline)
+    .flatMap((line): ProviderModelSummary[] => {
+      const column = columnFor(line);
+      if (!column || !isModelWindow(column)) return [];
+      const lanes = lanesBySnapshot
+        .map((snapshotLanes) => snapshotLanes.find((lane) => lane.id === line.id))
+        .filter((lane): lane is QuotaLane => lane !== undefined);
+      const stops = lanes.flatMap((lane) =>
+        lane.status === 'tight' && lane.runoutAtMs !== null ? [lane.runoutAtMs] : []
+      );
+      return [
+        {
+          line,
+          model: column.model as string,
+          carrying: lanes.length,
+          serving: lanes.filter((lane) => lane.status === 'open' || lane.status === 'tight').length,
+          short: stops.length,
+          firstStopMs: stops.length > 0 ? Math.min(...stops) : null,
+        },
+      ];
+    });
+
+  const period = (line: ProviderSummaryLine) => columnFor(line)?.periodHours ?? 0;
   // Stable: equal periods keep column order.
   const secondary = lines
-    .filter((line) => line !== headline)
+    .filter((line) => line !== headline && !models.some((model) => model.line === line))
     .map((line, index) => ({ line, index }))
     .sort((a, b) => period(b.line) - period(a.line) || a.index - b.index)
     .map(({ line }) => line);
 
-  return { credentialCount, loadedCount, headline, secondary };
+  return { credentialCount, loadedCount, headline, models, secondary };
 }

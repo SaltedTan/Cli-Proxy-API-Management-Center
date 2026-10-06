@@ -346,6 +346,265 @@
   }
 }
 
+/* ---------- 代理暂停（身份列）---------- */
+
+.paused {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--viz-failure);
+  @include text-ellipsis;
+}
+
+/* ---------- 车道：每个模型一列，另加「其他模型」一列 ----------
+ * 车道说明「此刻能否服务该模型」以及由哪个窗口决定；原始窗口留在下方的限额条。
+ * 宽布局下列头只出现一次（laneHead），每条车道自带的标题仅供读屏；
+ * 窄容器里列头隐藏、车道标题显形。 */
+
+.laneHead {
+  padding: 0 0 8px;
+  align-items: end;
+}
+
+.laneHeadLabel {
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  @include text-ellipsis;
+}
+
+/* 与行内动作同宽的隐形占位：各行是独立网格，靠它让列头与车道对齐 */
+.laneHeadSpacer {
+  visibility: hidden;
+}
+
+.laneRow {
+  align-items: start;
+}
+
+.lane,
+.laneMissing {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.laneMissing {
+  justify-content: center;
+  min-height: 64px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.laneTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.laneTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.laneStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+/* 状态记号：形状 + 颜色双编码（圆 = 可用，三角 = 即将用尽，方块 = 已暂停） */
+.statusMark {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: $radius-full;
+  background: var(--text-tertiary);
+}
+
+.statusOpen .statusMark {
+  background: var(--viz-success);
+}
+
+.statusTight .statusMark {
+  width: 10px;
+  border-radius: 0;
+  background: var(--amber-color);
+  clip-path: polygon(50% 4%, 100% 96%, 0 96%);
+}
+
+.statusClosed .statusMark {
+  border-radius: 2px;
+  background: var(--viz-failure);
+}
+
+.lanePercent {
+  flex-shrink: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.laneGate {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.laneGateLabel {
+  min-width: 0;
+  @include text-ellipsis;
+}
+
+/* 换行只发生在片段之间，不把「refills Sun 17:54」拆成两行 */
+.laneCaution {
+  color: var(--amber-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.laneAside {
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.laneCaution::before,
+.laneAside::before {
+  content: '·';
+  margin: 0 6px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.laneFoot {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.laneNote {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---------- 限额条：车道行的全部原始窗口 ---------- */
+
+.chips {
+  grid-column: 2 / span var(--ledger-cols, 1);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+/* 与首行限额片同高，换行后仍对齐第一行 */
+.chipsLabel {
+  align-self: flex-start;
+  line-height: 24px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* 零基准：列表留在标签旁，在内部换行，而不是整体掉到下一行 */
+.chipList {
+  flex: 1 1 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-full;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* 正在决定某条车道的窗口 */
+.chipDeciding {
+  border-color: var(--text-secondary);
+
+  .chipLabel {
+    color: var(--text-primary);
+    font-weight: 650;
+  }
+}
+
+.chipLabel {
+  min-width: 0;
+  @include text-ellipsis;
+}
+
+.chipBar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.chipFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.chipHigh {
+  background: var(--viz-success);
+}
+
+.chipMedium {
+  background: var(--quota-medium-color);
+}
+
+.chipLow {
+  background: var(--viz-failure);
+}
+
+.chipPercent {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.chipReset {
+  color: var(--text-tertiary);
+}
+
 /* ---------- 展开详情：复用卡片内容 ---------- */
 
 .detail {
@@ -361,6 +620,53 @@
 
   &[hidden] {
     display: none;
+  }
+}
+
+/* ---------- 中等容器：车道行把身份 + 动作放到首行，车道并排占满宽度 ---------- */
+
+/* 须在窄容器规则之前：同优先级时窄容器的 .row 模板后声明而胜出 */
+@container (max-width: 960px) {
+  .laneRow {
+    grid-template-columns: repeat(var(--ledger-cols, 1), minmax(0, 1fr)) auto;
+  }
+
+  .laneRow .identity {
+    grid-row: 1;
+    grid-column: 1 / -2;
+  }
+
+  .laneRow .actions {
+    grid-row: 1;
+    grid-column: -2 / -1;
+  }
+
+  .laneRow .chips {
+    grid-column: 1 / -1;
+  }
+
+  .laneHead {
+    display: none;
+  }
+
+  .laneTitle {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+
+  /* 标题可见后与相邻车道顶部对齐，不再垂直居中 */
+  .laneMissing {
+    justify-content: flex-start;
+    min-height: 0;
   }
 }
 
@@ -383,7 +689,10 @@
   }
 
   .cell,
-  .span {
+  .span,
+  .lane,
+  .laneMissing,
+  .chips {
     grid-column: 1 / -1;
   }
 

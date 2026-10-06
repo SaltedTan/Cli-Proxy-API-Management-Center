@@ -15,6 +15,10 @@ import i18n from '@/i18n';
 import { QuotaSummaryStrip } from '@/features/quota/components/QuotaSummaryStrip';
 import { summarizeProvider } from '@/features/quota/ledgerModel';
 import { DAY_MS } from '@/utils/time/durations';
+import en from '@/i18n/locales/en.json';
+import zhCN from '@/i18n/locales/zh-CN.json';
+import zhTW from '@/i18n/locales/zh-TW.json';
+import ru from '@/i18n/locales/ru.json';
 
 const NOW = new Date(2026, 8, 10, 12).getTime();
 
@@ -59,6 +63,53 @@ describe('QuotaSummaryStrip', () => {
     // Only one secondary window: no disclosure needed.
     expect(markup).toContain('5-hour limit');
     expect(markup).not.toContain('aria-expanded');
+  });
+
+  test("gives a model's own limit a block that says how many credentials can serve it", () => {
+    const reset = NOW + 3 * DAY_MS;
+    const credential = (fable: number) => ({
+      plan: 'Max 5x',
+      windows: [
+        { ...window('weekly', 80, 168), label: '7-day limit', scope: 'account' as const },
+        {
+          id: 'fable',
+          label: '7-day Fable',
+          remaining: fable,
+          resetAtMs: reset,
+          resetLabel: null,
+          periodHours: 168,
+          scope: 'scoped' as const,
+          model: 'Fable',
+        },
+      ],
+    });
+    const summary = summarizeProvider([credential(70), credential(0)], NOW);
+    const markup = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [{ provider: 'claude', summary }],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    // The account-wide limit headlines; Fable gets its own block, not a folded line.
+    expect(markup.indexOf('7-day limit')).toBeLessThan(markup.indexOf('7-day Fable'));
+    expect(markup).toContain('70%');
+    expect(markup).toContain('of 200%');
+    expect(markup).toContain('1 of 2 can serve now');
+    expect(markup).toContain('None projected to run out before refill');
+    expect(markup.match(/role="img"/g)).toHaveLength(2);
+    expect(markup).not.toContain('aria-expanded');
+
+    // 10% left with four of seven days gone: projected to stop before the refill.
+    const short = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [{ provider: 'claude', summary: summarizeProvider([credential(10)], NOW) }],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    expect(short).toContain('1 of 1 can serve now');
+    expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
   });
 
   test('says when a provider has nothing loaded yet', () => {
@@ -113,9 +164,63 @@ describe('ledger source contracts', () => {
     expect(ledgerStyles).toContain('@container (max-width: 720px)');
   });
 
+  test('model lanes are titled for assistive tech and collapse in narrow containers', () => {
+    expect(ledger).toContain('buildQuotaLanes(snapshot, now)');
+    expect(ledger).toContain('<LaneHeadRow columns={laneColumns} />');
+    expect(ledger).toContain('aria-hidden="true"');
+    expect(ledger).toContain('<span className={styles.laneTitle}>{title}</span>');
+    expect(ledger).toContain('aria-labelledby={labelId}');
+    // Lanes stack below 960px, ahead of the general 720px collapse, so they never get squeezed.
+    const middle = ledgerStyles.indexOf('@container (max-width: 960px)');
+    const narrow = ledgerStyles.indexOf('@container (max-width: 720px)');
+    expect(middle).toBeGreaterThan(-1);
+    expect(middle).toBeLessThan(narrow);
+    const stacked = ledgerStyles.slice(middle, narrow);
+    expect(stacked).toContain('.laneHead {');
+    expect(stacked).toContain('.laneTitle {');
+    expect(stacked).toContain('.laneRow .identity {');
+  });
+
+  test('page joins the proxy pauses into ledger snapshots', () => {
+    expect(page).toContain('pauses: ledgerPausesFromCooldowns(entry.file.cooldownSnapshot)');
+  });
+
   test('page defaults to the ledger and masks emails until asked', () => {
     expect(page).toContain("readQuotaUiState()?.view ?? 'ledger'");
     expect(page).toContain('readQuotaUiState()?.showEmails ?? false');
     expect(page).toContain('maskEmails={!showEmails}');
   });
+});
+
+describe('lane locale keys', () => {
+  const KEYS = [
+    'ledger_paused_until',
+    'ledger_limits_label',
+    'lane_other_models',
+    'lane_status_open',
+    'lane_status_tight',
+    'lane_status_closed',
+    'lane_status_unknown',
+    'lane_runs_out_before',
+    'lane_used_up',
+    'lane_lasts',
+    'lane_refills',
+    'lane_then_refills',
+    'lane_runs_out',
+    'lane_back',
+    'lane_no_limit',
+    'lane_pause_model',
+    'summary_serving',
+    'summary_runs_short',
+    'summary_none_short',
+  ] as const;
+
+  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
+    test(`${locale} translates every lane and model-block string`, () => {
+      const quota = messages.quota_management as Record<string, string>;
+      expect(KEYS.filter((key) => !quota[key])).toEqual([]);
+      expect(messages.claude_quota.seven_day_model).toContain('{{model}}');
+      expect('seven_day_fable' in messages.claude_quota).toBe(false);
+    });
+  }
 });

@@ -125,9 +125,74 @@ describe('summarizeProvider', () => {
     expect(fable?.coverage).toBe(1);
   });
 
+  test('a scoped window never headlines while an account-wide one exists', () => {
+    const snapshot: LedgerSnapshot = {
+      plan: 'Max',
+      windows: [
+        win({ id: 'fable', remaining: 30, periodHours: 168, scope: 'scoped', model: 'Fable' }),
+        win({ id: 'seven-day', remaining: 90, periodHours: 168, scope: 'account' }),
+        win({ id: 'oauth', remaining: 70, periodHours: 168, scope: 'scoped' }),
+      ],
+    };
+    const summary = summarizeProvider([snapshot, snapshot], NOW);
+    expect(summary.headline?.id).toBe('seven-day');
+    // The model window becomes a model block; a scoped window without a model stays secondary.
+    expect(summary.models.map((model) => model.line.id)).toEqual(['fable']);
+    expect(summary.secondary.map((line) => line.id)).toEqual(['oauth']);
+  });
+
+  test('model blocks count the credentials that could serve the model now', () => {
+    const cycleStart = NOW - 4 * DAY_MS;
+    const reset = cycleStart + 7 * DAY_MS;
+    const credential = (fable: number, sevenDay: number, pauses?: LedgerSnapshot['pauses']) => ({
+      plan: 'Max',
+      // Claude's ledger order: account-wide 7-day first, then the session, then Fable.
+      windows: [
+        win({
+          id: 'seven-day',
+          remaining: sevenDay,
+          resetAtMs: reset,
+          periodHours: 168,
+          scope: 'account',
+        }),
+        win({ id: 'five-hour', remaining: 90, periodHours: 5, scope: 'account' }),
+        win({
+          id: 'fable',
+          remaining: fable,
+          resetAtMs: reset,
+          periodHours: 168,
+          scope: 'scoped',
+          model: 'Fable',
+        }),
+      ],
+      ...(pauses ? { pauses } : {}),
+    });
+    const summary = summarizeProvider(
+      [
+        credential(80, 80),
+        // Over pace: 4 of 7 days gone with only 10% left — runs out before the reset.
+        credential(10, 80),
+        credential(0, 80, [{ scope: 'model', modelKey: 'claude-fable-5-1', untilMs: reset }]),
+        null,
+      ],
+      NOW
+    );
+    expect(summary.headline?.id).toBe('seven-day');
+    const [fable] = summary.models;
+    expect(fable.model).toBe('Fable');
+    expect(fable.carrying).toBe(3);
+    expect(fable.serving).toBe(2);
+    expect(fable.short).toBe(1);
+    expect(fable.firstStopMs).not.toBeNull();
+    expect(fable.firstStopMs as number).toBeLessThan(reset);
+    expect(fable.line.capacity).toBe(400);
+    expect(fable.line.totalRemaining).toBe(90);
+  });
+
   test('reports no headline when nothing is loaded', () => {
     const summary = summarizeProvider([null, null], NOW);
     expect(summary.headline).toBeNull();
+    expect(summary.models).toEqual([]);
     expect(summary.secondary).toEqual([]);
     expect(summary.loadedCount).toBe(0);
   });
@@ -149,7 +214,7 @@ describe('provider ledger extractors', () => {
     }
   });
 
-  test('Claude leads with the model-scoped weekly limit and reads percent remaining', () => {
+  test('Claude leads with the account-wide 7-day limit and reads percent remaining', () => {
     const quota: ClaudeQuotaState = {
       status: 'success',
       planType: 'plan_max',
@@ -158,6 +223,7 @@ describe('provider ledger extractors', () => {
           id: 'five-hour',
           label: '5-hour limit',
           labelKey: 'claude_quota.five_hour',
+          scope: 'account',
           usedPercent: 0,
           resetLabel: '-',
           resetAtMs: null,
@@ -167,6 +233,7 @@ describe('provider ledger extractors', () => {
           id: 'seven-day',
           label: '7-day limit',
           labelKey: 'claude_quota.seven_day',
+          scope: 'account',
           usedPercent: 21,
           resetLabel: '-',
           resetAtMs: NOW + DAY_MS,
@@ -175,7 +242,10 @@ describe('provider ledger extractors', () => {
         {
           id: 'seven-day-fable',
           label: '7-day Fable',
-          labelKey: 'claude_quota.seven_day_fable',
+          labelKey: 'claude_quota.seven_day_model',
+          labelParams: { model: 'Fable 5.1' },
+          scope: 'scoped',
+          model: 'Fable 5.1',
           usedPercent: 42,
           resetLabel: '-',
           resetAtMs: NOW + DAY_MS,
@@ -186,12 +256,20 @@ describe('provider ledger extractors', () => {
     const ledger = buildClaudeLedger(quota, i18n.t);
     expect(ledger.plan).toBe('Max');
     expect(ledger.windows.map((window) => window.id)).toEqual([
-      'seven-day-fable',
       'seven-day',
       'five-hour',
+      'seven-day-fable',
     ]);
-    expect(ledger.windows.map((window) => window.remaining)).toEqual([58, 79, 100]);
-    expect(ledger.windows[2].resetAtMs).toBeNull();
+    expect(ledger.windows.map((window) => window.remaining)).toEqual([79, 100, 58]);
+    expect(ledger.windows[1].resetAtMs).toBeNull();
+    // Scope and model survive into the ledger, and the label is the payload's model name.
+    expect(ledger.windows.map((window) => window.scope)).toEqual(['account', 'account', 'scoped']);
+    expect(ledger.windows[2]).toMatchObject({ model: 'Fable 5.1', label: '7-day Fable 5.1' });
+  });
+
+  test('Claude shows the Max size when the profile reports one', () => {
+    const quota: ClaudeQuotaState = { status: 'success', planType: 'plan_max5', windows: [] };
+    expect(buildClaudeLedger(quota, i18n.t).plan).toBe('Max 5x');
   });
 
   test('Claude accounts without a Fable limit lead with the 7-day limit and get no Fable column', () => {

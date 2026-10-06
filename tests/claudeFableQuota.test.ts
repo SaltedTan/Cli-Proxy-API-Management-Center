@@ -8,6 +8,19 @@ const t = ((key: string) => key) as TFunction;
 const modernReset = '2026-07-27T10:00:00.000000+00:00';
 const legacyReset = '2026-07-28T10:00:00.000000+00:00';
 
+const fableWindow = (usedPercent: number, reset: string, model = 'Fable') => ({
+  id: 'seven-day-fable',
+  label: 'claude_quota.seven_day_model',
+  labelKey: 'claude_quota.seven_day_model',
+  labelParams: { model },
+  scope: 'scoped',
+  model,
+  usedPercent,
+  resetLabel: formatQuotaResetTime(reset),
+  resetAtMs: Date.parse(reset),
+  periodHours: 24 * 7,
+});
+
 describe('Claude Fable quota', () => {
   test('builds a Fable window from the modern scoped limits payload', () => {
     const windows = buildClaudeQuotaWindows(
@@ -26,17 +39,27 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toEqual([
+    expect(windows).toEqual([fableWindow(64, modernReset)]);
+  });
+
+  test('keeps detecting Fable when its display name gains a version', () => {
+    const windows = buildClaudeQuotaWindows(
       {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
-        usedPercent: 64,
-        resetLabel: formatQuotaResetTime(modernReset),
-        resetAtMs: Date.parse(modernReset),
-        periodHours: 24 * 7,
+        limits: [
+          {
+            kind: 'weekly_scoped',
+            percent: 30,
+            resets_at: modernReset,
+            is_active: true,
+            scope: { model: { display_name: 'Fable 5.1' } },
+          },
+        ],
       },
-    ]);
+      t
+    );
+
+    // The label follows the payload; the id stays put so columns and lanes line up.
+    expect(windows).toEqual([fableWindow(30, modernReset, 'Fable 5.1')]);
   });
 
   test('falls back to the legacy Fable field', () => {
@@ -50,17 +73,7 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toEqual([
-      {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
-        usedPercent: 41,
-        resetLabel: formatQuotaResetTime(legacyReset),
-        resetAtMs: Date.parse(legacyReset),
-        periodHours: 24 * 7,
-      },
-    ]);
+    expect(windows).toEqual([fableWindow(41, legacyReset)]);
   });
 
   test('falls back to the legacy field when the modern percent is invalid', () => {
@@ -83,17 +96,7 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toEqual([
-      {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
-        usedPercent: 41,
-        resetLabel: formatQuotaResetTime(legacyReset),
-        resetAtMs: Date.parse(legacyReset),
-        periodHours: 24 * 7,
-      },
-    ]);
+    expect(windows).toEqual([fableWindow(41, legacyReset)]);
   });
 
   test('prefers the active modern field without rendering a duplicate', () => {
@@ -154,36 +157,70 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toEqual([
-      {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
-        usedPercent: 64,
-        resetLabel: formatQuotaResetTime(modernReset),
-        resetAtMs: Date.parse(modernReset),
-        periodHours: 24 * 7,
-      },
-    ]);
+    expect(windows).toEqual([fableWindow(64, modernReset)]);
   });
 
-  test('ignores malformed and unrelated limits while preserving standard windows', () => {
+  test('ignores malformed and non-weekly limits while preserving standard windows', () => {
     const payload = {
       five_hour: { utilization: 10, resets_at: null },
       seven_day: { utilization: 20, resets_at: legacyReset },
       limits: [
         null,
-        { kind: 'weekly_scoped', percent: 35, scope: { model: { display_name: 'Sonnet' } } },
         { kind: 'session', percent: 50, scope: { model: { display_name: 'Fable' } } },
         { kind: 'weekly_scoped', percent: null, scope: { model: { display_name: 'Fable' } } },
+        { kind: 'weekly_scoped', percent: 50, scope: { model: { display_name: '  ' } } },
+        { kind: 'weekly_scoped', percent: 50, scope: null },
       ],
     } as unknown as ClaudeUsagePayload;
 
     const windows = buildClaudeQuotaWindows(payload, t);
 
-    expect(windows.map(({ id, usedPercent }) => ({ id, usedPercent }))).toEqual([
-      { id: 'five-hour', usedPercent: 10 },
-      { id: 'seven-day', usedPercent: 20 },
+    expect(windows.map(({ id, usedPercent, scope }) => ({ id, usedPercent, scope }))).toEqual([
+      { id: 'five-hour', usedPercent: 10, scope: 'account' },
+      { id: 'seven-day', usedPercent: 20, scope: 'account' },
     ]);
+  });
+
+  test('gives every model-scoped weekly limit its own window, superseding the named key', () => {
+    const windows = buildClaudeQuotaWindows(
+      {
+        seven_day: { utilization: 20, resets_at: legacyReset },
+        seven_day_sonnet: { utilization: 90, resets_at: legacyReset },
+        limits: [
+          {
+            kind: 'weekly_scoped',
+            percent: 35,
+            resets_at: modernReset,
+            scope: { model: { display_name: 'Sonnet 5' } },
+          },
+          {
+            kind: 'WEEKLY_SCOPED',
+            percent: 64,
+            resets_at: modernReset,
+            scope: { model: { display_name: 'Fable' } },
+          },
+        ],
+      },
+      t
+    );
+
+    expect(
+      windows.map(({ id, usedPercent, scope, model }) => ({ id, usedPercent, scope, model }))
+    ).toEqual([
+      { id: 'seven-day', usedPercent: 20, scope: 'account', model: undefined },
+      { id: 'seven-day-sonnet', usedPercent: 35, scope: 'scoped', model: 'Sonnet 5' },
+      { id: 'seven-day-fable', usedPercent: 64, scope: 'scoped', model: 'Fable' },
+    ]);
+  });
+
+  test('marks product-scoped named windows as scoped without a model', () => {
+    const windows = buildClaudeQuotaWindows(
+      { seven_day_oauth_apps: { utilization: 5, resets_at: legacyReset } },
+      t
+    );
+
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({ id: 'seven-day-oauth-apps', scope: 'scoped' });
+    expect(windows[0].model).toBeUndefined();
   });
 });

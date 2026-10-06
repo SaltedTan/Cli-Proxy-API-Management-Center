@@ -48,6 +48,35 @@ describe('Claude plan type', () => {
     }
   );
 
+  test.each([
+    ['default_claude_max_5x', 'plan_max5'],
+    ['default_claude_max_20x', 'plan_max20'],
+    ['DEFAULT_CLAUDE_MAX_20X', 'plan_max20'],
+    ['default_claude_max', 'plan_max'],
+    ['default_claude_max_15x', 'plan_max'],
+    [undefined, 'plan_max'],
+  ] as const)('sizes a Max plan from rate-limit tier %s', (rateLimitTier, expected) => {
+    expect(
+      resolveClaudePlanType({
+        account: { has_claude_max: true },
+        organization: { organization_type: 'claude_max', rate_limit_tier: rateLimitTier },
+      })
+    ).toBe(expected);
+  });
+
+  test('an active Team organization still wins over a Max tier', () => {
+    expect(
+      resolveClaudePlanType({
+        account: { has_claude_max: true },
+        organization: {
+          organization_type: 'claude_team',
+          subscription_status: 'active',
+          rate_limit_tier: 'default_claude_max_5x',
+        },
+      })
+    ).toBe('plan_team');
+  });
+
   test('preserves case-insensitive organization matching', () => {
     expect(
       resolveClaudePlanType({

@@ -197,6 +197,70 @@
   font-weight: 600;
 }
 
+/* ---------- 模型自有限额（如 Fable 周限额）：池 + 此刻可服务数 + 展望 ---------- */
+
+.model {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.modelHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.modelServing,
+.modelOutlook {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.modelTotal {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+/* 与账本车道同一套记号：圆 = 都可用，三角 = 部分 / 即将用尽，方块 = 都已暂停 */
+.mark {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: $radius-full;
+}
+
+.markOpen {
+  background: var(--viz-success);
+}
+
+.markTight {
+  width: 9px;
+  height: 9px;
+  border-radius: 0;
+  background: var(--amber-color);
+  clip-path: polygon(50% 4%, 100% 96%, 0 96%);
+}
+
+.markClosed {
+  border-radius: 2px;
+  background: var(--viz-failure);
+}
+
 /* ---------- 次要窗口（折叠） ---------- */
 
 .secondary {

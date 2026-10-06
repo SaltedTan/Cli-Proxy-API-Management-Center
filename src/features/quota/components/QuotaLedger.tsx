@@ -9,17 +9,42 @@
  * renders the same content as a card.
  *
  * Loading stays click-to-fetch, exactly as on the cards.
+ *
+ * A group whose credentials carry a model-scoped limit (Claude's Fable weekly)
+ * swaps window columns for lanes — one per model, plus one for every other
+ * model — that say whether the credential can serve the model now and which
+ * window decides it (laneModel.ts). Every raw window stays on the row as a chip.
  */
 
-import { useId, useMemo, useState, type CSSProperties } from 'react';
+import { useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { IconChevronDown, IconRefreshCw } from '@/components/ui/icons';
-import { buildResetDisplay, resolveQuotaErrorMessage } from '@/utils/quota';
+import {
+  buildResetDisplay,
+  formatInstantWeekday,
+  formatRelativeInstant,
+  resolveQuotaErrorMessage,
+} from '@/utils/quota';
 import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import { HOUR_MS } from '@/utils/time/durations';
 import { getTypeLabel } from '@/features/authFiles/constants';
 import { LEDGER_MAX_COLUMNS } from '../constants';
-import { buildLedgerColumns, type LedgerColumn, type LedgerSnapshot } from '../ledgerModel';
+import {
+  approximateInstant,
+  buildLaneColumns,
+  buildQuotaLanes,
+  hasModelLanes,
+  ledgerPausesFromCooldowns,
+  type LaneColumn,
+  type QuotaLane,
+} from '../laneModel';
+import {
+  buildLedgerColumns,
+  type LedgerColumn,
+  type LedgerSnapshot,
+  type LedgerWindow,
+} from '../ledgerModel';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { maskEmailsInText } from '../maskEmail';
 import { computeWindowPace } from '../paceModel';
@@ -27,7 +52,11 @@ import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import type { QuotaProviderType } from '../providers/types';
 import { bindPaceClasses, bindQuotaClasses } from '../types';
 import { QuotaCardContent } from './QuotaCard';
-import { QuotaMeter } from './QuotaMeter';
+import {
+  QUOTA_PROGRESS_HIGH_THRESHOLD,
+  QUOTA_PROGRESS_MEDIUM_THRESHOLD,
+  QuotaMeter,
+} from './QuotaMeter';
 import { PaceMark, PaceVerdict } from './QuotaPace';
 import bodyStyles from './QuotaBody.module.scss';
 import styles from './QuotaLedger.module.scss';
@@ -83,11 +112,17 @@ function LedgerGroupSection({
 }: QuotaLedgerProps & { group: LedgerGroup }) {
   const { t } = useTranslation();
   const headingId = useId();
-  const columns = useMemo(
-    () => buildLedgerColumns(group.entries.map(snapshotFor)).slice(0, LEDGER_MAX_COLUMNS),
-    [group.entries, snapshotFor]
+  const snapshots = useMemo(() => group.entries.map(snapshotFor), [group.entries, snapshotFor]);
+  const laneColumns = useMemo(
+    () => (snapshots.some(hasModelLanes) ? buildLaneColumns(snapshots) : null),
+    [snapshots]
   );
-  const style = { '--ledger-cols': Math.max(columns.length, 1) } as CSSProperties;
+  const columns = useMemo(
+    () => buildLedgerColumns(snapshots).slice(0, LEDGER_MAX_COLUMNS),
+    [snapshots]
+  );
+  const columnCount = laneColumns ? laneColumns.length : columns.length;
+  const style = { '--ledger-cols': Math.max(columnCount, 1) } as CSSProperties;
 
   return (
     <section className={styles.group} aria-labelledby={headingId} style={style}>
@@ -96,12 +131,14 @@ function LedgerGroupSection({
         <span className={styles.groupCount}>{group.entries.length}</span>
       </h2>
       <ul className={styles.rows}>
-        {group.entries.map((entry) => (
+        {laneColumns && <LaneHeadRow columns={laneColumns} />}
+        {group.entries.map((entry, index) => (
           <LedgerRow
             key={getQuotaCacheKey(entry.file)}
             entry={entry}
             columns={columns}
-            snapshot={snapshotFor(entry)}
+            laneColumns={laneColumns}
+            snapshot={snapshots[index]}
             {...rowProps}
           />
         ))}
@@ -113,12 +150,45 @@ function LedgerGroupSection({
 type LedgerRowProps = Omit<QuotaLedgerProps, 'entries' | 'snapshotFor'> & {
   entry: QuotaFileEntry;
   columns: LedgerColumn[];
+  /** Set when the group renders lanes instead of window columns. */
+  laneColumns: LaneColumn[] | null;
   snapshot: LedgerSnapshot | null;
 };
+
+const laneTitle = (t: TFunction, model: string | null) =>
+  model ?? t('quota_management.lane_other_models');
+
+/**
+ * Column titles for a lane group, once above the rows. Hidden from assistive
+ * tech: each lane carries its own title (visually hidden on wide layouts). The
+ * trailing copy of the row actions keeps the lane columns aligned with the
+ * rows, which are separate grids.
+ */
+function LaneHeadRow({ columns }: { columns: LaneColumn[] }) {
+  const { t } = useTranslation();
+  return (
+    <li className={`${styles.row} ${styles.laneHead}`} aria-hidden="true">
+      <span />
+      {columns.map((column) => (
+        <span key={column.id} className={styles.laneHeadLabel}>
+          {laneTitle(t, column.model)}
+        </span>
+      ))}
+      <span className={`${styles.actions} ${styles.laneHeadSpacer}`}>
+        <span className={styles.iconAction} />
+        <span className={styles.refresh}>
+          <IconRefreshCw size={13} />
+          {t('auth_files.quota_refresh_single')}
+        </span>
+      </span>
+    </li>
+  );
+}
 
 function LedgerRow({
   entry,
   columns,
+  laneColumns,
   snapshot,
   quotaFor,
   now,
@@ -128,7 +198,7 @@ function LedgerRow({
   onRefresh,
   onReset,
 }: LedgerRowProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const detailId = useId();
   const [expanded, setExpanded] = useState(false);
   const adapter = QUOTA_ADAPTERS[entry.type];
@@ -140,19 +210,35 @@ function LedgerRow({
   const resetting = resettingName === getQuotaCacheKey(file);
   const rawName = getQuotaDisplayName(file);
   const displayName = maskEmails ? maskEmailsInText(rawName, file.email) : rawName;
-  const hiddenWindows = snapshot
-    ? snapshot.windows.filter((window) => !columns.some((column) => column.id === window.id)).length
-    : 0;
+  const lanes = useMemo(
+    () => (laneColumns && snapshot ? buildQuotaLanes(snapshot, now) : null),
+    [laneColumns, snapshot, now]
+  );
+  const hiddenWindows =
+    snapshot && !lanes
+      ? snapshot.windows.filter((window) => !columns.some((column) => column.id === window.id))
+          .length
+      : 0;
   const canExpand = status === 'success' || status === 'error';
   const isExpanded = expanded && canExpand;
+  const credentialPause = ledgerPausesFromCooldowns(file.cooldownSnapshot)
+    .filter((pause) => pause.scope === 'credential' && pause.untilMs > now)
+    .reduce<number | null>((latest, pause) => Math.max(latest ?? 0, pause.untilMs), null);
 
   return (
-    <li className={styles.row}>
+    <li className={lanes ? `${styles.row} ${styles.laneRow}` : styles.row}>
       <div className={styles.identity}>
         <span className={styles.name} title={displayName}>
           {displayName}
         </span>
         {snapshot?.plan && <span className={styles.plan}>{snapshot.plan}</span>}
+        {credentialPause !== null && (
+          <span className={styles.paused}>
+            {t('quota_management.ledger_paused_until', {
+              at: formatInstantWeekday(credentialPause, i18n.resolvedLanguage),
+            })}
+          </span>
+        )}
       </div>
 
       {status === 'idle' ? (
@@ -185,6 +271,18 @@ function LedgerRow({
             ),
           })}
         </div>
+      ) : lanes && laneColumns && snapshot ? (
+        <>
+          {laneColumns.map((column) => (
+            <LaneCell
+              key={column.id}
+              lane={lanes.find((lane) => lane.id === column.id) ?? null}
+              column={column}
+              now={now}
+            />
+          ))}
+          <LimitChips snapshot={snapshot} lanes={lanes} />
+        </>
       ) : snapshot && snapshot.windows.length > 0 ? (
         columns.map((column, index) => (
           <WindowCell
@@ -325,6 +423,181 @@ function WindowCell({
           className={styles.cellPace}
         />
       )}
+    </div>
+  );
+}
+
+function LaneCell({
+  lane,
+  column,
+  now,
+}: {
+  lane: QuotaLane | null;
+  column: LaneColumn;
+  now: number;
+}) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage;
+  const title = laneTitle(t, column.model);
+  if (!lane) {
+    return (
+      <div className={styles.laneMissing}>
+        <span className={styles.laneTitle}>{title}</span>
+        <span>
+          {column.model
+            ? t('quota_management.lane_no_limit', { model: column.model })
+            : t('quota_management.ledger_no_windows')}
+        </span>
+      </div>
+    );
+  }
+
+  const { gate, own } = lane;
+  const pace = computeWindowPace(gate, now);
+  const knownPace = pace.status === 'unknown' ? null : pace;
+  const at = (ms: number) => formatInstantWeekday(ms, locale);
+  const statusClass = {
+    open: styles.statusOpen,
+    tight: styles.statusTight,
+    closed: styles.statusClosed,
+    unknown: styles.statusUnknown,
+  }[lane.status];
+
+  let foot: ReactNode = null;
+  if (lane.status === 'tight' && lane.runoutAtMs !== null) {
+    foot = (
+      <>
+        {t('quota_management.lane_runs_out', { at: at(approximateInstant(lane.runoutAtMs)) })}
+        {gate.resetAtMs !== null && (
+          <span className={styles.laneAside}>
+            {t('quota_management.lane_then_refills', { at: at(gate.resetAtMs) })}
+          </span>
+        )}
+      </>
+    );
+  } else if (lane.status === 'closed') {
+    foot =
+      lane.reopenAtMs === null ? null : (
+        <>
+          {t('quota_management.lane_back', {
+            relative: formatRelativeInstant(lane.reopenAtMs, now, locale),
+          })}
+          <span className={styles.laneAside}>{at(lane.reopenAtMs)}</span>
+        </>
+      );
+  } else if (own.resetAtMs !== null && own.resetAtMs > now) {
+    // "Lasts" is a projection, so it waits until the cycle is far enough along to make one.
+    const ownPace = computeWindowPace(own, now);
+    foot =
+      ownPace.status !== 'unknown' && !ownPace.early ? (
+        <>
+          {t('quota_management.lane_lasts')}
+          <span className={styles.laneAside}>{at(own.resetAtMs)}</span>
+        </>
+      ) : (
+        t('quota_management.lane_refills', { at: at(own.resetAtMs) })
+      );
+  }
+
+  return (
+    <div className={styles.lane}>
+      <span className={styles.laneTitle}>{title}</span>
+      <div className={styles.laneTop}>
+        <span className={`${styles.laneStatus} ${statusClass}`}>
+          <span className={styles.statusMark} aria-hidden="true" />
+          {t(`quota_management.lane_status_${lane.status}`)}
+        </span>
+        <span className={styles.lanePercent}>
+          {gate.remaining === null ? '--' : `${Math.round(gate.remaining)}%`}
+        </span>
+      </div>
+      <div className={styles.laneGate}>
+        <span className={styles.laneGateLabel} title={gate.label}>
+          {gate.label}
+        </span>
+        {lane.status === 'tight' && gate.id !== own.id && (
+          <span className={styles.laneCaution}>
+            {t('quota_management.lane_runs_out_before', { name: title })}
+          </span>
+        )}
+        {lane.status === 'closed' && gate.remaining !== null && gate.remaining <= 0 && (
+          <span className={styles.laneAside}>{t('quota_management.lane_used_up')}</span>
+        )}
+      </div>
+      <div className={paceStyles.meter}>
+        <QuotaMeter percent={gate.remaining} classes={quotaClasses} />
+        {knownPace && <PaceMark pace={knownPace} classes={paceStyles} />}
+      </div>
+      {foot && <div className={styles.laneFoot}>{foot}</div>}
+      {lane.pause?.scope === 'model' && (
+        <div className={styles.laneNote}>
+          {t('quota_management.lane_pause_model', { model: title })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const chipLevelClass = (remaining: number) =>
+  remaining >= QUOTA_PROGRESS_HIGH_THRESHOLD
+    ? styles.chipHigh
+    : remaining >= QUOTA_PROGRESS_MEDIUM_THRESHOLD
+      ? styles.chipMedium
+      : styles.chipLow;
+
+/**
+ * Every window of a lane row, account-wide shortest first, then the scoped
+ * ones. The windows currently deciding a lane are outlined.
+ */
+function LimitChips({ snapshot, lanes }: { snapshot: LedgerSnapshot; lanes: QuotaLane[] }) {
+  const { t, i18n } = useTranslation();
+  const labelId = useId();
+  const deciding = new Set(
+    lanes
+      .filter((lane) => lane.status === 'tight' || lane.status === 'closed')
+      .map((lane) => lane.gate.id)
+  );
+  const account = snapshot.windows
+    .filter((window) => window.scope === 'account')
+    .sort((a, b) => (a.periodHours ?? 0) - (b.periodHours ?? 0));
+  const ordered: LedgerWindow[] = [
+    ...account,
+    ...snapshot.windows.filter((window) => window.scope !== 'account'),
+  ];
+
+  return (
+    <div className={styles.chips}>
+      <span id={labelId} className={styles.chipsLabel}>
+        {t('quota_management.ledger_limits_label')}
+      </span>
+      <ul className={styles.chipList} aria-labelledby={labelId}>
+        {ordered.map((window) => (
+          <li
+            key={window.id}
+            className={
+              deciding.has(window.id) ? `${styles.chip} ${styles.chipDeciding}` : styles.chip
+            }
+          >
+            <span className={styles.chipLabel}>{window.label}</span>
+            <span className={styles.chipBar} aria-hidden="true">
+              {window.remaining !== null && (
+                <span
+                  className={`${styles.chipFill} ${chipLevelClass(window.remaining)}`}
+                  style={{ width: `${window.remaining}%` }}
+                />
+              )}
+            </span>
+            <span className={styles.chipPercent}>
+              {window.remaining === null ? '--' : `${Math.round(window.remaining)}%`}
+            </span>
+            <span className={styles.chipReset}>
+              {window.resetAtMs === null
+                ? t('quota_management.no_reset_pending')
+                : formatInstantWeekday(window.resetAtMs, i18n.resolvedLanguage)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

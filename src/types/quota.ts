@@ -157,10 +157,22 @@ export interface ClaudeProfileResponse {
   };
 }
 
+/**
+ * What an exhausted window stops. `account` windows gate every request on the
+ * credential; `scoped` ones only part of it — one model (Fable) or one product
+ * (OAuth apps). The proxy draws the same line: an exhausted Fable limit pauses
+ * only Fable on the credential, an exhausted 5-hour or 7-day limit benches it.
+ */
+export type QuotaWindowScope = 'account' | 'scoped';
+
 export interface ClaudeQuotaWindow {
   id: string;
   label: string;
   labelKey?: string;
+  labelParams?: Record<string, string>;
+  scope?: QuotaWindowScope;
+  /** Display name of the model a scoped window limits, e.g. "Fable"; absent otherwise. */
+  model?: string | null;
   usedPercent: number | null;
   resetLabel: string;
   /**

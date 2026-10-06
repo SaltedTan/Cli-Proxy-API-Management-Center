@@ -49,7 +49,9 @@ export function ClaudeQuotaBody({ quota, classes }: QuotaBodyProps<ClaudeQuotaSt
           const remaining =
             clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
           const percentLabel = remaining === null ? '--' : `${Math.round(remaining)}%`;
-          const windowLabel = window.labelKey ? t(window.labelKey) : window.label;
+          const windowLabel = window.labelKey
+            ? t(window.labelKey, window.labelParams)
+            : window.label;
           const resetDisplay = buildResetDisplay(
             window.resetLabel,
             window.resetAtMs,

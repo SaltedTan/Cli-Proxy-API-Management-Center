@@ -38,6 +38,7 @@ import {
   type QuotaTabId,
   type QuotaViewMode,
 } from './constants';
+import { ledgerPausesFromCooldowns } from './laneModel';
 import { summarizeProvider, type LedgerSnapshot } from './ledgerModel';
 import { maskEmailsInText } from './maskEmail';
 import {
@@ -230,14 +231,18 @@ export function QuotaPage() {
     [showEmails]
   );
 
-  /* ---------- 账本快照 / 提供商汇总 ---------- */
+  /* ---------- 账本快照 / 提供商汇总 ----------
+   * 快照并入代理的冷却（暂停）：车道据此区分「仅暂停某模型」与「整个账号被暂停」。 */
 
   const ledgerSnapshots = useMemo(() => {
     const snapshots = new Map<string, LedgerSnapshot>();
     entries.forEach((entry) => {
       const quota = quotaByType[entry.type][getQuotaCacheKey(entry.file)];
       if (quota?.status === 'success') {
-        snapshots.set(entryKey(entry), QUOTA_ADAPTERS[entry.type].ledger(quota, t));
+        snapshots.set(entryKey(entry), {
+          ...QUOTA_ADAPTERS[entry.type].ledger(quota, t),
+          pauses: ledgerPausesFromCooldowns(entry.file.cooldownSnapshot),
+        });
       }
     });
     return snapshots;

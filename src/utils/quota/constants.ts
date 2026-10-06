@@ -116,19 +116,53 @@ export const CLAUDE_REQUEST_HEADERS = {
   'anthropic-beta': 'oauth-2025-04-20',
 };
 
-export const CLAUDE_USAGE_WINDOW_KEYS = [
-  { key: 'five_hour', id: 'five-hour', labelKey: 'claude_quota.five_hour' },
-  { key: 'seven_day', id: 'seven-day', labelKey: 'claude_quota.seven_day' },
+/**
+ * Named windows of the usage payload. `model` marks a model's own weekly limit;
+ * a `limits[]` entry for the same model family supersedes the named key.
+ */
+export const CLAUDE_USAGE_WINDOW_KEYS: readonly {
+  key: string;
+  id: string;
+  labelKey: string;
+  scope: 'account' | 'scoped';
+  model?: string;
+}[] = [
+  { key: 'five_hour', id: 'five-hour', labelKey: 'claude_quota.five_hour', scope: 'account' },
+  { key: 'seven_day', id: 'seven-day', labelKey: 'claude_quota.seven_day', scope: 'account' },
   {
     key: 'seven_day_oauth_apps',
     id: 'seven-day-oauth-apps',
     labelKey: 'claude_quota.seven_day_oauth_apps',
+    scope: 'scoped',
   },
-  { key: 'seven_day_opus', id: 'seven-day-opus', labelKey: 'claude_quota.seven_day_opus' },
-  { key: 'seven_day_sonnet', id: 'seven-day-sonnet', labelKey: 'claude_quota.seven_day_sonnet' },
-  { key: 'seven_day_cowork', id: 'seven-day-cowork', labelKey: 'claude_quota.seven_day_cowork' },
-  { key: 'iguana_necktie', id: 'seven-day-fable', labelKey: 'claude_quota.seven_day_fable' },
-] as const;
+  {
+    key: 'seven_day_opus',
+    id: 'seven-day-opus',
+    labelKey: 'claude_quota.seven_day_opus',
+    scope: 'scoped',
+    model: 'Opus',
+  },
+  {
+    key: 'seven_day_sonnet',
+    id: 'seven-day-sonnet',
+    labelKey: 'claude_quota.seven_day_sonnet',
+    scope: 'scoped',
+    model: 'Sonnet',
+  },
+  {
+    key: 'seven_day_cowork',
+    id: 'seven-day-cowork',
+    labelKey: 'claude_quota.seven_day_cowork',
+    scope: 'scoped',
+  },
+  {
+    key: 'iguana_necktie',
+    id: 'seven-day-fable',
+    labelKey: 'claude_quota.seven_day_model',
+    scope: 'scoped',
+    model: 'Fable',
+  },
+];
 
 // Codex API configuration
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';

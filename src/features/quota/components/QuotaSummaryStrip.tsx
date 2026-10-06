@@ -5,21 +5,24 @@
  * ("409% of 500%"), draws one segment per credential so a single exhausted
  * account stays visible inside a healthy total, names the soonest reset and
  * tallies how many credentials spend that window over, on or under pace.
- * Secondary windows fold behind a toggle — the strip is for orientation, the
- * ledger below is for detail.
+ * A model's own limit (Claude's Fable weekly) gets a block of its own: its pool,
+ * how many credentials could serve the model now, and whether any is projected
+ * to stop before its refill. Other secondary windows fold behind a toggle — the
+ * strip is for orientation, the ledger below is for detail.
  */
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ResolvedTheme } from '@/types';
-import { formatInstantShort, formatRelativeInstant } from '@/utils/quota';
+import { formatInstantShort, formatInstantWeekday, formatRelativeInstant } from '@/utils/quota';
 import {
   getAuthFileIcon,
   getThemeSurfaceIconBackground,
   getTypeLabel,
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
-import type { ProviderSummary, ProviderSummaryLine } from '../ledgerModel';
+import type { ProviderModelSummary, ProviderSummary, ProviderSummaryLine } from '../ledgerModel';
+import { approximateInstant } from '../laneModel';
 import type { PaceCounts } from '../paceModel';
 import type { QuotaProviderType } from '../providers/types';
 import { QUOTA_PROGRESS_HIGH_THRESHOLD, QUOTA_PROGRESS_MEDIUM_THRESHOLD } from './QuotaMeter';
@@ -138,6 +141,10 @@ function SummaryCell({
 
       {headline && <PaceLine pace={headline.pace} />}
 
+      {summary.models.map((model) => (
+        <ModelBlock key={model.line.id} model={model} locale={i18n.resolvedLanguage} />
+      ))}
+
       {firstSecondary && (
         <div className={styles.secondary}>
           <div className={styles.secondaryRow}>
@@ -168,6 +175,87 @@ function SummaryCell({
         </div>
       )}
     </article>
+  );
+}
+
+function Segments({ line, label }: { line: ProviderSummaryLine; label: string }) {
+  return (
+    <div className={styles.segments} role="img" aria-label={label}>
+      {line.segments.map((remaining, index) => (
+        <span key={index} className={styles.segment}>
+          {remaining !== null && (
+            <span
+              className={`${styles.segmentFill} ${levelClass(remaining)}`}
+              style={{ width: `${remaining}%` }}
+            />
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A model's own limit, pooled like the headline, plus what the ledger's lanes
+ * say about it: how many credentials could serve the model right now, and how
+ * many are projected to stop before their refill (by any window, not just the
+ * model's own — see laneModel.ts).
+ */
+function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: string }) {
+  const { t } = useTranslation();
+  const { line } = model;
+  const total = line.totalRemaining === null ? '--' : `${line.totalRemaining}%`;
+  const servingClass =
+    model.serving === model.carrying
+      ? styles.markOpen
+      : model.serving === 0
+        ? styles.markClosed
+        : styles.markTight;
+
+  return (
+    <div className={styles.model}>
+      <div className={styles.modelHead}>
+        <span className={styles.headlineLabel}>{line.label}</span>
+        {model.carrying > 0 && (
+          <span className={styles.modelServing}>
+            <span className={`${styles.mark} ${servingClass}`} aria-hidden="true" />
+            {t('quota_management.summary_serving', {
+              serving: model.serving,
+              total: model.carrying,
+            })}
+          </span>
+        )}
+      </div>
+      <div className={styles.figure}>
+        <span className={styles.modelTotal}>{total}</span>
+        <span className={styles.capacity}>
+          {t('quota_management.summary_of_capacity', { capacity: line.capacity })}
+        </span>
+      </div>
+      <Segments
+        line={line}
+        label={t('quota_management.summary_segments_label', {
+          total,
+          capacity: `${line.capacity}%`,
+          count: line.segments.length,
+        })}
+      />
+      {model.serving > 0 && (
+        <div className={styles.modelOutlook}>
+          <span
+            className={`${styles.mark} ${model.short > 0 ? styles.markTight : styles.markOpen}`}
+            aria-hidden="true"
+          />
+          {model.short > 0 && model.firstStopMs !== null
+            ? t('quota_management.summary_runs_short', {
+                short: model.short,
+                total: model.carrying,
+                at: formatInstantWeekday(approximateInstant(model.firstStopMs), locale),
+              })
+            : t('quota_management.summary_none_short')}
+        </div>
+      )}
+    </div>
   );
 }
 

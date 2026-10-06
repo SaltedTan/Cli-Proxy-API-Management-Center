@@ -89,6 +89,27 @@ export function formatInstantShort(ms: number): string {
   });
 }
 
+/**
+ * Weekday and time (`Fri 10:00` in English), browser-local and 24-hour. Weekly
+ * windows reset on a weekday, so this scans faster than `MM-DD HH:mm` when
+ * every instant lies within the coming week.
+ */
+export function formatInstantWeekday(ms: number, locale?: string): string {
+  if (!Number.isFinite(ms)) return '-';
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  };
+  try {
+    return new Date(ms).toLocaleString(locale, options);
+  } catch {
+    // Same fallback as the relative formatter: an unexpected locale throws.
+    return new Date(ms).toLocaleString(undefined, options);
+  }
+}
+
 export interface ResetDisplay {
   absolute: string;
   /** Null when no usable instant was available — render the absolute half alone. */
