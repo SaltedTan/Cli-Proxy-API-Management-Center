@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next';
 import { createInstance } from 'i18next';
 import en from '@/i18n/locales/en.json';
 import { ClaudeLimitEditorForm } from '@/features/dashboard/components/ClientUsagePanel';
+import type { KeyboardEvent } from 'react';
 
 const i18n = createInstance();
 await i18n.init({ lng: 'en', fallbackLng: 'en', resources: { en: { translation: en } } });
@@ -59,5 +60,25 @@ describe('client usage allowance editor', () => {
     const saving = render({ saving: true });
     // The input and both buttons.
     expect(saving.match(/disabled=""/g)).toHaveLength(3);
+  });
+
+  test('Escape is handled on the whole form, not only while the input has focus', () => {
+    const onKeyDown = (_event: KeyboardEvent<HTMLElement>) => undefined;
+    // The component has no hooks, so its element tree can be inspected directly.
+    const form = ClaudeLimitEditorForm({
+      name: 'MacBook',
+      t,
+      draft: '',
+      invalid: false,
+      saving: false,
+      hintId: 'hint',
+      inputRef: { current: null },
+      onDraftChange: () => undefined,
+      onSubmit: () => undefined,
+      onCancel: () => undefined,
+      onKeyDown,
+    });
+    expect(form.type).toBe('form');
+    expect(form.props.onKeyDown).toBe(onKeyDown);
   });
 });

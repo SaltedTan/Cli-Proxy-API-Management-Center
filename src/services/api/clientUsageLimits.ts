@@ -42,10 +42,15 @@ const resolvesTo = (entryKey: string, keyId: string): boolean => {
 /**
  * Replaces every entry for `id` and writes the whole map back. Entries for other keys
  * are written exactly as read, zero values and untrimmed keys included, so a save never
- * alters another operator's configuration.
+ * alters another operator's configuration. `assertConnection` was captured when the save
+ * was requested and aborts it before reading and before writing if the connection changed.
  */
-const writeLimit = async (id: string, value: number | null): Promise<void> => {
-  const assertConnection = guardConfigConnection();
+const writeLimit = async (
+  id: string,
+  value: number | null,
+  assertConnection: () => void
+): Promise<void> => {
+  assertConnection();
   const raw = await readRawLimits();
   assertConnection();
   const entries = Object.entries(raw).filter(([entryKey]) => !resolvesTo(entryKey, id));
@@ -82,7 +87,9 @@ export const clientUsageLimitsApi = {
   async set(keyId: string, value: number | null): Promise<void> {
     const id = keyId.trim();
     if (!id) throw new RangeError('Client key id is required');
-    const write = lastWrite.then(() => writeLimit(id, value));
+    // Bound to the connection the save was requested on, even while it waits its turn.
+    const assertConnection = guardConfigConnection();
+    const write = lastWrite.then(() => writeLimit(id, value, assertConnection));
     lastWrite = write.catch(() => undefined);
     return write;
   },

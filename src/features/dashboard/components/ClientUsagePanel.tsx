@@ -440,10 +440,11 @@ export function ClaudeLimitEditorForm({
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
-  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
 }) {
+  // Escape closes the editor from the input and from either button.
   return (
-    <form className={styles.limitEditor} noValidate onSubmit={onSubmit}>
+    <form className={styles.limitEditor} noValidate onSubmit={onSubmit} onKeyDown={onKeyDown}>
       <input
         ref={inputRef}
         type="number"
@@ -453,7 +454,6 @@ export function ClaudeLimitEditorForm({
         className={`input ${styles.limitInput}`}
         value={draft}
         onChange={(event) => onDraftChange(event.target.value)}
-        onKeyDown={onKeyDown}
         onFocus={(event) => event.currentTarget.select()}
         disabled={saving}
         autoFocus
@@ -567,7 +567,7 @@ function ClaudeLimitCell({
     }
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape' && !saving) {
       event.preventDefault();
       closeEditor();

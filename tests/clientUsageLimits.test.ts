@@ -210,4 +210,29 @@ describe('client usage limits: write', () => {
     await next;
     expect(server).toEqual({ [LAPTOP_ID]: 1.5, anonymous: 0.25, [PHONE_ID]: 4 });
   });
+
+  test('a save queued behind another is bound to the connection it was requested on', async () => {
+    const revision = spyOn(apiClient, 'getConnectionRevision').mockReturnValue(1);
+    spies.push(revision);
+    const get = mock('get');
+    let reads = 0;
+    get.mockImplementation(async () => {
+      reads += 1;
+      // The connection changes while the first save's read is in flight.
+      if (reads === 1) revision.mockReturnValue(2);
+      return { [PHONE_ID]: 0.25 };
+    });
+    const put = mock('put');
+    const outcomes = await Promise.allSettled([
+      clientUsageLimitsApi.set(LAPTOP_ID, 1),
+      clientUsageLimitsApi.set(PHONE_ID, 2),
+    ]);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe('rejected');
+      expect((outcome as PromiseRejectedResult).reason).toMatchObject({ name: 'AbortError' });
+    }
+    expect(put).not.toHaveBeenCalled();
+    // Only the first save had to read; the queued one was aborted before reading.
+    expect(reads).toBe(1);
+  });
 });
