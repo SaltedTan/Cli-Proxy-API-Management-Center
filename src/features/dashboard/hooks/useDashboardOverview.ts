@@ -5,6 +5,7 @@ import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
 import { useRoutingObservability } from './useRoutingObservability';
 import { useClientUsage } from './useClientUsage';
+import { clientUsageApi } from '@/services/api/clientUsage';
 import { clientUsageLimitsApi } from '@/services/api/clientUsageLimits';
 import { readApiKeyNames } from '@/features/config/apiKeyNames';
 import { buildLocalKeyNames } from '../clientUsage';
@@ -196,6 +197,15 @@ export function useDashboardOverview() {
     [refreshClientUsage, fetchConfig]
   );
 
+  /** Ends a key's current 7-day Claude window on the backend, then reloads the usage panel. */
+  const resetClientWindow = useCallback(
+    async (keyId: string) => {
+      await clientUsageApi.resetWindow(keyId);
+      await refreshClientUsage();
+    },
+    [refreshClientUsage]
+  );
+
   /** Scoped to the routing panel: its pool card is derived from auth-file cooldowns. */
   const refreshRoutingPanel = useCallback(async () => {
     if (!connected) return;
@@ -342,5 +352,6 @@ export function useDashboardOverview() {
     refreshRoutingPanel,
     refreshClientUsage,
     saveClientLimit,
+    resetClientWindow,
   };
 }

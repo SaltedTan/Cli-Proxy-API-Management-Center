@@ -47,9 +47,11 @@ export interface ClaudeCredentialRef {
   planSource: string;
 }
 
-/** One key's share of one credential's weekly limit; fractions are of that limit. */
+/**
+ * One key's usage of one credential: `current*` inside the key's own 7-day window,
+ * `total*` since tracking began. Fractions are of that credential's weekly limit.
+ */
 export interface ClientKeyClaudeCredentialUsage extends ClaudeCredentialRef {
-  windowResetsAtMs: number | null;
   currentFraction: number;
   currentProUnits: number;
   totalFraction: number;
@@ -57,16 +59,23 @@ export interface ClientKeyClaudeCredentialUsage extends ClaudeCredentialRef {
 }
 
 export interface ClientKeyClaudeUsage {
-  /** Claude Pro units used in each credential's open weekly window. */
+  /** Claude Pro units used in the key's current 7-day window; 0 when none is open. */
   currentProUnits: number;
   totalProUnits: number;
+  /**
+   * The key's own window, like a subscription period: it opens at the key's first Claude
+   * request, ends 7 days later, and the next one opens at the key's next request. Both are
+   * null while no window is open, and on backends that anchor usage to credential windows.
+   */
+  windowStartedAtMs: number | null;
+  windowResetsAtMs: number | null;
   /** `access.api-key-limits` allowance in Pro units per weekly window; null when unlimited. */
   limitProUnits: number | null;
   /** `max(limit - current, 0)`; null when unlimited. */
   remainingProUnits: number | null;
   /** The proxy is refusing this key's Claude requests until a window resets. */
   limitReached: boolean;
-  /** Earliest window reset among the credentials this key is using; null when unknown. */
+  /** When the allowance resets: the key's window end, or on older backends the earliest credential reset. */
   limitResetsAtMs: number | null;
   credentials: ClientKeyClaudeCredentialUsage[];
 }

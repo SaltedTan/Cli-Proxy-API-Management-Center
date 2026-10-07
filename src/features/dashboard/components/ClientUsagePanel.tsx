@@ -45,8 +45,10 @@ const API_KEYS_ROUTE = '/config?field=apiKeys';
 // Last-used and reset times only need coarse ticks.
 const clock = createSharedClock({ intervalMs: 30_000 });
 
-/** Writes a key's Claude allowance in Pro units per week; `null` removes it. */
+/** Writes a key's Claude allowance in Pro units per 7-day window; `null` removes it. */
 export type SaveClientLimit = (keyId: string, value: number | null) => Promise<void>;
+/** Ends a key's current 7-day Claude window on the backend; its history is kept. */
+export type ResetClientWindow = (keyId: string) => Promise<void>;
 
 export interface ClientUsagePanelProps {
   usage: ClientUsageState;
@@ -56,6 +58,8 @@ export interface ClientUsagePanelProps {
   onRefresh?: () => Promise<void>;
   /** Omitted (or a backend without `claude_limits_supported`) hides the allowance editor. */
   onSaveLimit?: SaveClientLimit;
+  /** Omitted hides the window reset; it is offered only on rows with an open window. */
+  onResetWindow?: ResetClientWindow;
   /** Injected by tests; the live panel follows the shared clock. */
   nowMs?: number;
 }
@@ -65,6 +69,7 @@ export function ClientUsagePanel({
   localNames,
   onRefresh,
   onSaveLimit,
+  onResetWindow,
   nowMs,
 }: ClientUsagePanelProps) {
   const { t, i18n } = useTranslation();
@@ -183,6 +188,7 @@ export function ClientUsagePanel({
                 locale={locale}
                 now={now}
                 onSaveLimit={saveLimit}
+                onResetWindow={onResetWindow}
               />
             ))}
           </ul>
@@ -246,12 +252,14 @@ function UsageRow({
   locale,
   now,
   onSaveLimit,
+  onResetWindow,
 }: {
   row: ClientUsageRow;
   t: TFunction;
   locale: string;
   now: number;
   onSaveLimit?: SaveClientLimit;
+  onResetWindow?: ResetClientWindow;
 }) {
   const units = (value: number) =>
     t('dashboard.client_usage_pro_units', { value: formatProUnits(value, locale) });
@@ -266,7 +274,9 @@ function UsageRow({
   const hasDetails = claudeCredentials.length > 0 || row.topModels.length > 0;
   // The allowance cell stays visible for unused keys, which otherwise collapse on phones.
   const claudeMetricClass =
-    row.claudeLimit || onSaveLimit ? `${styles.metric} ${styles.limitMetric}` : styles.metric;
+    row.claudeLimit || row.claudeWindow || onSaveLimit
+      ? `${styles.metric} ${styles.limitMetric}`
+      : styles.metric;
 
   return (
     <li className={row.used ? styles.row : `${styles.row} ${styles.unused}`}>
@@ -306,7 +316,14 @@ function UsageRow({
                 />
               </dd>
             )}
-            <ClaudeLimitCell row={row} t={t} locale={locale} now={now} onSave={onSaveLimit} />
+            <ClaudeLimitCell
+              row={row}
+              t={t}
+              locale={locale}
+              now={now}
+              onSave={onSaveLimit}
+              onResetWindow={onResetWindow}
+            />
           </div>
           <div className={styles.metric}>
             <dt className={styles.metricLabel}>{t('dashboard.client_usage_col_tokens')}</dt>
@@ -503,29 +520,41 @@ export function ClaudeLimitEditorForm({
  * enforces limits and the dashboard is connected. Enter saves, Escape cancels, and focus
  * returns to the edit button when the editor closes.
  */
+/**
+ * The allowance meter and editor, plus the key's open 7-day window with its reset
+ * control. The reset asks for confirmation inline, like the editor, and keeps the row
+ * in place while the backend ends the window.
+ */
 function ClaudeLimitCell({
   row,
   t,
   locale,
   now,
   onSave,
+  onResetWindow,
 }: {
   row: ClientUsageRow;
   t: TFunction;
   locale: string;
   now: number;
   onSave?: SaveClientLimit;
+  onResetWindow?: ResetClientWindow;
 }) {
   const showNotification = useNotificationStore((state) => state.showNotification);
   const status = row.claudeLimit;
+  const period = row.claudeWindow;
   const name = row.label.text;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const resetTriggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef(false);
+  const restoreResetFocusRef = useRef(false);
   const hintId = useId();
 
   useEffect(() => {
@@ -534,7 +563,39 @@ function ClaudeLimitCell({
     triggerRef.current?.focus();
   }, [editing]);
 
-  if (!status && !onSave) return null;
+  useEffect(() => {
+    if (confirming || !restoreResetFocusRef.current) return;
+    restoreResetFocusRef.current = false;
+    resetTriggerRef.current?.focus();
+  }, [confirming]);
+
+  if (!status && !onSave && !period) return null;
+
+  const closeConfirm = () => {
+    restoreResetFocusRef.current = true;
+    setConfirming(false);
+  };
+
+  const handleReset = async () => {
+    if (!onResetWindow || resetting) return;
+    setResetting(true);
+    try {
+      await onResetWindow(row.id);
+      closeConfirm();
+    } catch {
+      // Stay open so the reset can be retried.
+      showNotification(t('dashboard.client_usage_window_reset_error'), 'error');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleConfirmKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && !resetting) {
+      event.preventDefault();
+      closeConfirm();
+    }
+  };
 
   const openEditor = () => {
     setDraft(formatClaudeLimitInput(status?.limit ?? null));
@@ -647,6 +708,66 @@ function ClaudeLimitCell({
                 </time>
               </>
             )}
+          </span>
+        )}
+        {period && (
+          <span className={styles.windowLine}>
+            {/* The reached badge above already says when the window resets. */}
+            {!status?.reached && (
+              <time
+                dateTime={new Date(period.resetsAtMs).toISOString()}
+                title={new Date(period.resetsAtMs).toLocaleString(locale)}
+              >
+                {t('dashboard.client_usage_resets', {
+                  time: formatRelativeInstant(period.resetsAtMs, now, locale),
+                })}
+              </time>
+            )}
+            {onResetWindow &&
+              (confirming ? (
+                <span
+                  className={styles.windowConfirm}
+                  role="group"
+                  aria-label={t('dashboard.client_usage_window_reset_confirm', { name })}
+                  onKeyDown={handleConfirmKeyDown}
+                >
+                  <span>{t('dashboard.client_usage_window_reset_confirm', { name })}</span>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    className={styles.limitAction}
+                    onClick={() => void handleReset()}
+                    loading={resetting}
+                    aria-label={t('dashboard.client_usage_window_reset_yes_label', { name })}
+                  >
+                    {t('dashboard.client_usage_window_reset_yes')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={styles.limitAction}
+                    onClick={closeConfirm}
+                    disabled={resetting}
+                  >
+                    {t('dashboard.client_usage_window_reset_no')}
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  ref={resetTriggerRef}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={styles.windowReset}
+                  onClick={() => setConfirming(true)}
+                  aria-label={t('dashboard.client_usage_window_reset_label', { name })}
+                  title={t('dashboard.client_usage_window_reset_hint')}
+                >
+                  {t('dashboard.client_usage_window_reset')}
+                </Button>
+              ))}
           </span>
         )}
       </dd>

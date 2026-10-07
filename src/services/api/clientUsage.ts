@@ -99,7 +99,6 @@ const normalizeKeyClaudeCredential = (raw: unknown): ClientKeyClaudeCredentialUs
   if (!ref) return null;
   return {
     ...ref,
-    windowResetsAtMs: toTimeMs(raw.window_resets_at),
     currentFraction: toAmount(raw.current_fraction),
     currentProUnits: toAmount(raw.current_pro_units),
     totalFraction: toAmount(raw.total_fraction),
@@ -127,6 +126,8 @@ const normalizeKeyClaude = (raw: unknown): ClientKeyClaudeUsage | null => {
   return {
     currentProUnits,
     totalProUnits: toAmount(raw.total_pro_units),
+    windowStartedAtMs: toTimeMs(raw.window_started_at),
+    windowResetsAtMs: toTimeMs(raw.window_resets_at),
     limitProUnits,
     remainingProUnits,
     limitReached: raw.limit_reached === true,
@@ -216,5 +217,20 @@ export const clientUsageApi = {
       timeout: CLIENT_USAGE_TIMEOUT_MS,
     });
     return normalizeClientUsage(raw);
+  },
+
+  /**
+   * Ends the key's current 7-day window: its current usage goes back to zero and the next
+   * request opens a fresh window. Totals and daily history are kept. The backend answers
+   * 404 for a key it does not know.
+   */
+  resetWindow: async (keyId: string): Promise<void> => {
+    const id = keyId.trim();
+    if (!id) throw new RangeError('Client key id is required');
+    await apiClient.post(
+      `/observability/usage/clients/window/reset?id=${encodeURIComponent(id)}`,
+      undefined,
+      { timeout: CLIENT_USAGE_TIMEOUT_MS }
+    );
   },
 };

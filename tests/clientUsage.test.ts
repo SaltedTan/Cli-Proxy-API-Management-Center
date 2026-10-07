@@ -24,6 +24,7 @@ import {
   buildLocalKeyNames,
   claudeLimitStatus,
   claudeLimitTone,
+  claudeWindowStatus,
   claudePlanLabel,
   clientKeyId,
   clientKeyLabel,
@@ -110,6 +111,8 @@ const rawSnapshot = {
       claude: {
         current_pro_units: 0.84,
         total_pro_units: 2.31,
+        window_started_at: '2026-10-02T15:00:00Z',
+        window_resets_at: '2026-10-09T15:00:00Z',
         limit_pro_units: 1.5,
         remaining_pro_units: 0.66,
         limit_reached: false,
@@ -122,7 +125,6 @@ const rawSnapshot = {
             plan: 'max_5x',
             plan_pro_units: 2,
             plan_source: 'rate_limit_tier',
-            window_resets_at: '2026-10-09T15:00:00Z',
             current_fraction: 0.42,
             current_pro_units: 0.84,
             total_fraction: 1.155,
@@ -144,6 +146,8 @@ const rawSnapshot = {
       claude: {
         current_pro_units: 0.28,
         total_pro_units: 0.28,
+        window_started_at: '2026-10-03T00:00:00Z',
+        window_resets_at: '2026-10-10T00:00:00Z',
         limit_pro_units: 0.25,
         remaining_pro_units: 0,
         limit_reached: true,
@@ -155,7 +159,6 @@ const rawSnapshot = {
             plan: 'team',
             plan_pro_units: 1.25,
             plan_source: 'organization_type',
-            window_resets_at: '2026-10-10T00:00:00Z',
             current_fraction: 0.224,
             current_pro_units: 0.28,
             total_fraction: 0.224,
@@ -275,6 +278,8 @@ const key = (overrides: Partial<ClientKeyUsage> & { id: string }): ClientKeyUsag
 const claude = (overrides: Partial<ClientKeyClaudeUsage> = {}): ClientKeyClaudeUsage => ({
   currentProUnits: 0,
   totalProUnits: 0,
+  windowStartedAtMs: null,
+  windowResetsAtMs: null,
   limitProUnits: null,
   remainingProUnits: null,
   limitReached: false,
@@ -291,7 +296,8 @@ const rowOptions = { localNames, anonymousLabel, today: '2026-10-07', nowMs: NOW
 const renderPanel = (
   usage: ClientUsageState,
   onRefresh?: () => Promise<void>,
-  onSaveLimit?: (keyId: string, value: number | null) => Promise<void>
+  onSaveLimit?: (keyId: string, value: number | null) => Promise<void>,
+  onResetWindow?: (keyId: string) => Promise<void>
 ) =>
   renderToStaticMarkup(
     createElement(
@@ -300,7 +306,14 @@ const renderPanel = (
       createElement(
         MemoryRouter,
         null,
-        createElement(ClientUsagePanel, { usage, localNames, onRefresh, onSaveLimit, nowMs: NOW })
+        createElement(ClientUsagePanel, {
+          usage,
+          localNames,
+          onRefresh,
+          onSaveLimit,
+          onResetWindow,
+          nowMs: NOW,
+        })
       )
     )
   );
@@ -352,7 +365,6 @@ describe('client usage API', () => {
           plan: 'max_5x',
           planProUnits: 2,
           planSource: 'rate_limit_tier',
-          windowResetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
           currentFraction: 0.42,
           currentProUnits: 0.84,
           totalFraction: 1.155,
@@ -374,6 +386,32 @@ describe('client usage API', () => {
       });
     } finally {
       get.mockRestore();
+    }
+  });
+
+  test('resets a key window through the v8 route by id', async () => {
+    const post = spyOn(apiClient, 'post').mockResolvedValue(undefined);
+    try {
+      await clientUsageApi.resetWindow(` ${LAPTOP_ID} `);
+      expect(post).toHaveBeenCalledWith(
+        `/observability/usage/clients/window/reset?id=${LAPTOP_ID}`,
+        undefined,
+        { timeout: 15000 }
+      );
+      // Ids are hex, but whatever is passed is sent as one query value.
+      await clientUsageApi.resetWindow('a b&c');
+      expect(post).toHaveBeenLastCalledWith(
+        '/observability/usage/clients/window/reset?id=a%20b%26c',
+        undefined,
+        { timeout: 15000 }
+      );
+      await expect(clientUsageApi.resetWindow('  ')).rejects.toBeInstanceOf(RangeError);
+      expect(post).toHaveBeenCalledTimes(2);
+      // Backend failures (an unknown id answers 404) propagate to the caller.
+      post.mockRejectedValueOnce(Object.assign(new Error('not found'), { status: 404 }));
+      await expect(clientUsageApi.resetWindow(LAPTOP_ID)).rejects.toMatchObject({ status: 404 });
+    } finally {
+      post.mockRestore();
     }
   });
 
@@ -437,6 +475,8 @@ describe('client usage API', () => {
   test('reads Claude allowance fields and tolerates backends without them', () => {
     expect(snapshot.claudeLimitsSupported).toBe(true);
     expect(snapshot.keys[0].claude).toMatchObject({
+      windowStartedAtMs: Date.parse('2026-10-02T15:00:00Z'),
+      windowResetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
       limitProUnits: 1.5,
       remainingProUnits: 0.66,
       limitReached: false,
@@ -460,6 +500,8 @@ describe('client usage API', () => {
     expect(older.keys[0].claude).toEqual({
       currentProUnits: 0.5,
       totalProUnits: 0,
+      windowStartedAtMs: null,
+      windowResetsAtMs: null,
       limitProUnits: null,
       remainingProUnits: null,
       limitReached: false,
@@ -493,6 +535,8 @@ describe('client usage API', () => {
     expect(odd.keys[0].totals.blocked).toBe(0);
     expect(odd.keys[0].daily[0].blocked).toBe(2);
     expect(odd.keys[0].claude).toMatchObject({
+      windowStartedAtMs: null,
+      windowResetsAtMs: null,
       limitProUnits: 2,
       remainingProUnits: 1.5,
       limitReached: false,
@@ -612,6 +656,10 @@ describe('client usage logic', () => {
     const [laptop, phone, removed, limitOnly, desktop] = rows;
     expect(laptop.secondary).toBe('fixt...ptop');
     expect(laptop.week).toEqual({ requests: 60, failed: 3, blocked: 3, tokens: 2_500_000 });
+    expect(laptop.claudeWindow).toEqual({
+      startedAtMs: Date.parse('2026-10-02T15:00:00Z'),
+      resetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
+    });
     expect(laptop.claudeShare).toBeCloseTo(0.75, 10);
     expect(phone.claudeShare).toBeCloseTo(0.25, 10);
     expect(removed).toMatchObject({
@@ -620,6 +668,7 @@ describe('client usage logic', () => {
       claudeCurrentProUnits: null,
       claudeShare: null,
       claudeLimit: null,
+      claudeWindow: null,
       week: { requests: 0, failed: 0, blocked: 0, tokens: 0 },
     });
     expect(limitOnly).toMatchObject({
@@ -628,12 +677,14 @@ describe('client usage logic', () => {
       claudeCurrentProUnits: null,
       claudeShare: null,
       claudeLimit: { limit: 2, used: 0, remaining: 2, fraction: 0, reached: false },
+      claudeWindow: null,
     });
     expect(desktop).toMatchObject({
       used: false,
       secondary: undefined,
       claudeShare: null,
       claudeLimit: null,
+      claudeWindow: null,
     });
     // Refused requests count as use of the key.
     const [blockedOnly] = buildClientUsageRows(
@@ -707,6 +758,23 @@ describe('client usage logic', () => {
     ).toEqual([{ kind: 'no-keys' }, { kind: 'removed-keys', count: 1 }]);
   });
 
+  test("reads a key's open 7-day window", () => {
+    expect(claudeWindowStatus(snapshot.keys[0].claude, NOW)).toEqual({
+      startedAtMs: Date.parse('2026-10-02T15:00:00Z'),
+      resetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
+    });
+    // No window: never used Claude, a backend without key windows, or a window that ended.
+    expect(claudeWindowStatus(null, NOW)).toBe(null);
+    expect(claudeWindowStatus(claude({ currentProUnits: 1, limitResetsAtMs: NOW + 1 }), NOW)).toBe(
+      null
+    );
+    expect(claudeWindowStatus(claude({ windowResetsAtMs: NOW }), NOW)).toBe(null);
+    expect(claudeWindowStatus(claude({ windowResetsAtMs: NOW + 1 }), NOW)).toEqual({
+      startedAtMs: null,
+      resetsAtMs: NOW + 1,
+    });
+  });
+
   test('reads a Claude allowance against current usage', () => {
     const laptop = snapshot.keys[0].claude;
     const status = claudeLimitStatus(laptop, NOW);
@@ -731,11 +799,30 @@ describe('client usage logic', () => {
     expect(claudeLimitTone(phone!)).toBe('critical');
     // A reset instant that has passed is unknown until the next snapshot.
     expect(
-      claudeLimitStatus(claude({ ...laptop, limitResetsAtMs: NOW - 1 }), NOW)?.resetsAtMs
+      claudeLimitStatus(
+        claude({ ...laptop, windowResetsAtMs: null, limitResetsAtMs: NOW - 1 }),
+        NOW
+      )?.resetsAtMs
     ).toBe(null);
     expect(
-      claudeLimitStatus(claude({ ...laptop, limitResetsAtMs: NOW + 1 }), NOW)?.resetsAtMs
+      claudeLimitStatus(
+        claude({ ...laptop, windowResetsAtMs: null, limitResetsAtMs: NOW + 1 }),
+        NOW
+      )?.resetsAtMs
     ).toBe(NOW + 1);
+    // The key's own window end wins over the credential-derived instant of older backends.
+    expect(
+      claudeLimitStatus(
+        claude({ ...laptop, windowResetsAtMs: NOW + 5, limitResetsAtMs: NOW + 1 }),
+        NOW
+      )?.resetsAtMs
+    ).toBe(NOW + 5);
+    expect(
+      claudeLimitStatus(
+        claude({ ...laptop, windowResetsAtMs: NOW - 5, limitResetsAtMs: NOW + 1 }),
+        NOW
+      )?.resetsAtMs
+    ).toBe(null);
     // Remaining units are derived when the backend leaves them out.
     expect(
       claudeLimitStatus(claude({ ...laptop, remainingProUnits: null }), NOW)?.remaining
@@ -925,6 +1012,63 @@ describe('client usage panel rendering', () => {
     expect(unsupported).not.toContain(t('dashboard.client_usage_limit_none'));
   });
 
+  test("offers to reset a key's open window and says when it resets", () => {
+    const saveLimit = async () => undefined;
+    const resetWindow = async () => undefined;
+    const markup = renderPanel({ status: 'ready', data: snapshot }, onRefresh, saveLimit, resetWindow);
+    // Keys with an open window get the control; keys without one do not.
+    for (const name of ['MacBook', 'Phone']) {
+      expect(markup).toContain(
+        `aria-label="${html(t('dashboard.client_usage_window_reset_label', { name }))}"`
+      );
+    }
+    for (const name of [REMOVED_ID, LIMIT_ONLY_ID, 'fixt...ktop']) {
+      expect(markup).not.toContain(
+        `aria-label="${html(t('dashboard.client_usage_window_reset_label', { name }))}"`
+      );
+    }
+    expect(markup).toContain(`title="${html(t('dashboard.client_usage_window_reset_hint'))}"`);
+    expect(markup.match(new RegExp(t('dashboard.client_usage_window_reset'), 'g'))).toHaveLength(
+      2
+    );
+    // Confirmation is asked only after a click.
+    expect(markup).not.toContain(
+      html(t('dashboard.client_usage_window_reset_confirm', { name: 'MacBook' }))
+    );
+    // An open window under its limit says when it resets; a reached limit already does,
+    // and the credential cards below the rows say when each credential's week resets.
+    const resetsIn = (rendered: string) => rendered.match(/resets in /g)?.length ?? 0;
+    expect(markup).toMatch(/<time [^>]*>resets in 2 days<\/time>/);
+    // A backend without key windows reports no window: nothing to reset, and only the
+    // reached badge and the credential cards say when anything resets.
+    const noWindows = {
+      ...snapshot,
+      keys: snapshot.keys.map((entry) =>
+        entry.claude
+          ? {
+              ...entry,
+              claude: claude({ ...entry.claude, windowStartedAtMs: null, windowResetsAtMs: null }),
+            }
+          : entry
+      ),
+    };
+    const legacy = renderPanel(
+      { status: 'ready', data: noWindows },
+      onRefresh,
+      saveLimit,
+      resetWindow
+    );
+    expect(legacy).not.toContain(t('dashboard.client_usage_window_reset'));
+    expect(resetsIn(markup)).toBe(resetsIn(legacy) + 1);
+    // Without the handler (disconnected) there is no control, but the window still shows.
+    const readOnly = renderPanel({ status: 'ready', data: snapshot }, onRefresh, saveLimit);
+    expect(readOnly).not.toContain(
+      t('dashboard.client_usage_window_reset_label', { name: 'MacBook' })
+    );
+    expect(resetsIn(readOnly)).toBe(resetsIn(markup));
+    expect(markup).not.toContain('dashboard.client_usage_');
+  });
+
   test('asks for one key per device when all devices share one', () => {
     const markup = renderPanel(
       ready({
@@ -1011,6 +1155,21 @@ describe('client usage panel rendering', () => {
       new URL('../src/features/dashboard/DashboardPage.tsx', import.meta.url)
     ).text();
     expect(page).toContain('onSaveLimit={connected ? saveClientLimit : undefined}');
+  });
+
+  test('resetting a window calls the backend, then reloads usage', async () => {
+    const source = await Bun.file(
+      new URL('../src/features/dashboard/hooks/useDashboardOverview.ts', import.meta.url)
+    ).text();
+    const reset = source.slice(source.indexOf('const resetClientWindow = useCallback'));
+    const body = reset.slice(0, reset.indexOf('}, ['));
+    const call = body.indexOf('await clientUsageApi.resetWindow(keyId)');
+    expect(call).toBeGreaterThan(-1);
+    expect(body.indexOf('refreshClientUsage()')).toBeGreaterThan(call);
+    const page = await Bun.file(
+      new URL('../src/features/dashboard/DashboardPage.tsx', import.meta.url)
+    ).text();
+    expect(page).toContain('onResetWindow={connected ? resetClientWindow : undefined}');
   });
 });
 

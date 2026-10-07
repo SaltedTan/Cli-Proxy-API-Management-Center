@@ -122,17 +122,35 @@ const claudeUsed = (claude: ClientKeyClaudeUsage | null): claude is ClientKeyCla
   claude !== null &&
   (claude.currentProUnits > 0 || claude.totalProUnits > 0 || claude.credentials.length > 0);
 
+/** A key's open 7-day window. */
+export interface ClaudeWindowStatus {
+  /** Null on backends that report only the reset instant. */
+  startedAtMs: number | null;
+  resetsAtMs: number;
+}
+
+/** Null while the key has no open window (never used Claude, idle past its last window, or reset). */
+export function claudeWindowStatus(
+  claude: ClientKeyClaudeUsage | null,
+  nowMs: number
+): ClaudeWindowStatus | null {
+  if (!claude || claude.windowResetsAtMs === null || claude.windowResetsAtMs <= nowMs) {
+    return null;
+  }
+  return { startedAtMs: claude.windowStartedAtMs, resetsAtMs: claude.windowResetsAtMs };
+}
+
 export interface ClaudeLimitStatus {
-  /** Configured allowance in Pro units per weekly window. */
+  /** Configured allowance in Pro units per 7-day window. */
   limit: number;
-  /** Pro units used in the open weekly windows. */
+  /** Pro units used in the key's current window. */
   used: number;
   remaining: number;
   /** `used / limit`, capped at 1. */
   fraction: number;
   /** The proxy is refusing this key's Claude requests. */
   reached: boolean;
-  /** When the earliest open window resets; null when unknown or already passed. */
+  /** When the key's window resets; null when unknown or already passed. */
   resetsAtMs: number | null;
 }
 
@@ -144,10 +162,9 @@ export function claudeLimitStatus(
   if (!claude || claude.limitProUnits === null || claude.limitProUnits <= 0) return null;
   const limit = claude.limitProUnits;
   const used = claude.currentProUnits;
-  const resetsAtMs =
-    claude.limitResetsAtMs !== null && claude.limitResetsAtMs > nowMs
-      ? claude.limitResetsAtMs
-      : null;
+  // The key's own window end; older backends only report the credential-derived instant.
+  const reportedReset = claude.windowResetsAtMs ?? claude.limitResetsAtMs;
+  const resetsAtMs = reportedReset !== null && reportedReset > nowMs ? reportedReset : null;
   return {
     limit,
     used,
@@ -214,6 +231,8 @@ export interface ClientUsageRow {
   claudeShare: number | null;
   /** Null without a configured Claude allowance. */
   claudeLimit: ClaudeLimitStatus | null;
+  /** The key's open 7-day window; null when none is open. */
+  claudeWindow: ClaudeWindowStatus | null;
   claudeCredentials: ClientKeyClaudeCredentialUsage[];
   topModels: ClientUsageModel[];
 }
@@ -250,6 +269,7 @@ export function buildClientUsageRows(
       claudeTotalProUnits: entry.claude?.totalProUnits ?? 0,
       claudeShare: null,
       claudeLimit: claudeLimitStatus(entry.claude, nowMs),
+      claudeWindow: claudeWindowStatus(entry.claude, nowMs),
       claudeCredentials: [...(entry.claude?.credentials ?? [])].sort(
         (a, b) =>
           b.currentProUnits - a.currentProUnits ||
