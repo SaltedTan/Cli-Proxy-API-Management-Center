@@ -777,6 +777,10 @@ describe('client usage logic', () => {
     for (const invalid of ['-1', 'abc', '1e400', 'NaN', '1,5']) {
       expect(parseClaudeLimitInput(invalid)).toBeUndefined();
     }
+    // A number input reports an empty value for text it could not parse; that is not
+    // a request to clear the limit.
+    expect(parseClaudeLimitInput('', true)).toBeUndefined();
+    expect(parseClaudeLimitInput('1.5', true)).toBeUndefined();
     expect(formatClaudeLimitInput(null)).toBe('');
     expect(formatClaudeLimitInput(0)).toBe('');
     expect(formatClaudeLimitInput(1.5)).toBe('1.5');

@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
+  type RefObject,
 } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -411,6 +412,93 @@ function UsageRow({
 }
 
 /**
+ * The allowance editor. Native constraint validation is off (`noValidate`): a configured
+ * value off the 0.05 spinner step, such as 1.23, must still reach the submit handler,
+ * which validates and rounds instead. `inputRef` lets the handler read the input's
+ * `validity.badInput` flag.
+ */
+export function ClaudeLimitEditorForm({
+  name,
+  t,
+  draft,
+  invalid,
+  saving,
+  hintId,
+  inputRef,
+  onDraftChange,
+  onSubmit,
+  onCancel,
+  onKeyDown,
+}: {
+  name: string;
+  t: TFunction;
+  draft: string;
+  invalid: boolean;
+  saving: boolean;
+  hintId: string;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onDraftChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <form className={styles.limitEditor} noValidate onSubmit={onSubmit}>
+      <input
+        ref={inputRef}
+        type="number"
+        inputMode="decimal"
+        step="0.05"
+        min="0"
+        className={`input ${styles.limitInput}`}
+        value={draft}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        onFocus={(event) => event.currentTarget.select()}
+        disabled={saving}
+        autoFocus
+        aria-label={t('dashboard.client_usage_limit_input_label', { name })}
+        aria-describedby={hintId}
+        aria-invalid={invalid || undefined}
+      />
+      <Button
+        type="submit"
+        variant="primary"
+        size="sm"
+        className={styles.limitAction}
+        loading={saving}
+        aria-label={t('dashboard.client_usage_limit_save', { name })}
+      >
+        {t('common.save')}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={styles.limitAction}
+        onClick={onCancel}
+        disabled={saving}
+        aria-label={t('dashboard.client_usage_limit_cancel', { name })}
+      >
+        {t('common.cancel')}
+      </Button>
+      <span
+        id={hintId}
+        className={
+          invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint
+        }
+      >
+        {t(
+          invalid
+            ? 'dashboard.client_usage_limit_invalid'
+            : 'dashboard.client_usage_limit_hint'
+        )}
+      </span>
+    </form>
+  );
+}
+
+/**
  * Allowance meter and "used / limit" line, with an inline editor when the backend
  * enforces limits and the dashboard is connected. Enter saves, Escape cancels, and focus
  * returns to the edit button when the editor closes.
@@ -436,6 +524,7 @@ function ClaudeLimitCell({
   const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef(false);
   const hintId = useId();
 
@@ -461,7 +550,7 @@ function ClaudeLimitCell({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!onSave || saving) return;
-    const value = parseClaudeLimitInput(draft);
+    const value = parseClaudeLimitInput(draft, inputRef.current?.validity.badInput ?? false);
     if (value === undefined) {
       setInvalid(true);
       return;
@@ -500,60 +589,22 @@ function ClaudeLimitCell({
       )}
       <dd className={styles.limit}>
         {editing && onSave ? (
-          <form className={styles.limitEditor} onSubmit={(event) => void handleSubmit(event)}>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.05"
-              min="0"
-              className={`input ${styles.limitInput}`}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                setInvalid(false);
-              }}
-              onKeyDown={handleKeyDown}
-              onFocus={(event) => event.currentTarget.select()}
-              disabled={saving}
-              autoFocus
-              aria-label={t('dashboard.client_usage_limit_input_label', { name })}
-              aria-describedby={hintId}
-              aria-invalid={invalid || undefined}
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              className={styles.limitAction}
-              loading={saving}
-              aria-label={t('dashboard.client_usage_limit_save', { name })}
-            >
-              {t('common.save')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={styles.limitAction}
-              onClick={closeEditor}
-              disabled={saving}
-              aria-label={t('dashboard.client_usage_limit_cancel', { name })}
-            >
-              {t('common.cancel')}
-            </Button>
-            <span
-              id={hintId}
-              className={
-                invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint
-              }
-            >
-              {t(
-                invalid
-                  ? 'dashboard.client_usage_limit_invalid'
-                  : 'dashboard.client_usage_limit_hint'
-              )}
-            </span>
-          </form>
+          <ClaudeLimitEditorForm
+            name={name}
+            t={t}
+            draft={draft}
+            invalid={invalid}
+            saving={saving}
+            hintId={hintId}
+            inputRef={inputRef}
+            onDraftChange={(value) => {
+              setDraft(value);
+              setInvalid(false);
+            }}
+            onSubmit={(event) => void handleSubmit(event)}
+            onCancel={closeEditor}
+            onKeyDown={handleKeyDown}
+          />
         ) : (
           <span className={styles.limitText}>
             <span>

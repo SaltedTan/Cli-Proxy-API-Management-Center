@@ -154,4 +154,60 @@ describe('client usage limits: write', () => {
     expect(put).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
   });
+
+  test('writes other entries back exactly as read and matches keys the way the backend does', async () => {
+    // Go's strings.TrimSpace keeps U+FEFF and strips U+0085, unlike String.prototype.trim.
+    const BOM_KEY = '﻿fixture-key-bom';
+    const NEL_KEY = '\u0085fixture-key-nel';
+    const PADDED_ID = ` ${LAPTOP_ID} `;
+    const get = mock('get', { [BOM_KEY]: 2, zero: 0, [PADDED_ID]: 1, [NEL_KEY]: 3 });
+    const put = mock('put');
+    await clientUsageLimitsApi.set(PHONE_ID, 1.5);
+    expect(put).toHaveBeenLastCalledWith(PATH, {
+      [BOM_KEY]: 2,
+      zero: 0,
+      [PADDED_ID]: 1,
+      [NEL_KEY]: 3,
+      [PHONE_ID]: 1.5,
+    });
+    // Editing the id of a full-key entry removes that entry whatever its padding.
+    await clientUsageLimitsApi.set(clientKeyId(BOM_KEY), 0.5);
+    expect(put).toHaveBeenLastCalledWith(PATH, {
+      zero: 0,
+      [PADDED_ID]: 1,
+      [NEL_KEY]: 3,
+      [clientKeyId(BOM_KEY)]: 0.5,
+    });
+    await clientUsageLimitsApi.set(clientKeyId('fixture-key-nel'), null);
+    expect(put).toHaveBeenLastCalledWith(PATH, { [BOM_KEY]: 2, zero: 0, [PADDED_ID]: 1 });
+    // A padded id entry is the id, as the backend trims it the same way.
+    await clientUsageLimitsApi.set(LAPTOP_ID, null);
+    expect(put).toHaveBeenLastCalledWith(PATH, { [BOM_KEY]: 2, zero: 0, [NEL_KEY]: 3 });
+    expect(get).toHaveBeenCalledTimes(4);
+  });
+
+  test('saves from several rows run one after another, each on the latest map', async () => {
+    let server: Record<string, number> = { [LAPTOP_ID]: 1, [PHONE_ID]: 2 };
+    const get = mock('get');
+    get.mockImplementation(async () => ({ ...server }));
+    const put = mock('put');
+    put.mockImplementation(async (_path: string, body?: unknown) => {
+      server = { ...(body as Record<string, number>) };
+    });
+    await Promise.all([
+      clientUsageLimitsApi.set(LAPTOP_ID, 1.5),
+      clientUsageLimitsApi.set(PHONE_ID, 2.5),
+      clientUsageLimitsApi.set('anonymous', 0.25),
+    ]);
+    expect(server).toEqual({ [LAPTOP_ID]: 1.5, [PHONE_ID]: 2.5, anonymous: 0.25 });
+    expect(put).toHaveBeenCalledTimes(3);
+    // A failed save does not hold up the next one.
+    const failure = { status: 500 };
+    put.mockRejectedValueOnce(failure);
+    const failed = clientUsageLimitsApi.set(LAPTOP_ID, 3);
+    const next = clientUsageLimitsApi.set(PHONE_ID, 4);
+    await expect(failed).rejects.toBe(failure);
+    await next;
+    expect(server).toEqual({ [LAPTOP_ID]: 1.5, anonymous: 0.25, [PHONE_ID]: 4 });
+  });
 });

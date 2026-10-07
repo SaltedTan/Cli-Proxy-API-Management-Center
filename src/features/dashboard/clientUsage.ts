@@ -167,7 +167,10 @@ export function claudeLimitTone(status: ClaudeLimitStatus): MeterTone {
  * Allowance editor text: a limit to set, `null` to clear (blank or 0), or `undefined`
  * when the text is not a non-negative number.
  */
-export function parseClaudeLimitInput(text: string): number | null | undefined {
+export function parseClaudeLimitInput(text: string, badInput = false): number | null | undefined {
+  // A number input reports an empty value for text it could not parse (`badInput`);
+  // that must not pass as a request to clear the limit.
+  if (badInput) return undefined;
   const trimmed = text.trim();
   if (!trimmed) return null;
   const value = Number(trimmed);

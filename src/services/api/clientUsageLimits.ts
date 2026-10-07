@@ -5,7 +5,7 @@
  */
 import { apiClient } from './client';
 import { getConfigValue, guardConfigConnection, isMissingConfigValue } from './configValue';
-import { clientKeyId } from '@/utils/clientKeyId';
+import { clientKeyId, trimSpaceLikeGo } from '@/utils/clientKeyId';
 import { isRecord } from '@/utils/helpers';
 
 const PATH = '/config/access/api-key-limits';
@@ -23,46 +23,67 @@ export const normalizeClientUsageLimit = (value: number | null | undefined): num
   return rounded > 0 ? rounded : null;
 };
 
-const readLimits = async (): Promise<Array<[string, number]>> => {
+/** The map as stored, with every entry as the backend returned it. */
+const readRawLimits = async (): Promise<Record<string, unknown>> => {
   const raw = await getConfigValue<unknown>(PATH, {});
-  if (!isRecord(raw)) return [];
-  const entries: Array<[string, number]> = [];
-  for (const [name, value] of Object.entries(raw)) {
-    const key = name.trim();
-    const limit = toLimit(value);
-    if (key && limit !== null) entries.push([key, limit]);
-  }
-  return entries;
+  return isRecord(raw) ? raw : {};
 };
 
-/** Whether a map entry, by id or by full key, applies to `keyId`. */
-const resolvesTo = (entryKey: string, keyId: string): boolean =>
-  entryKey === keyId || clientKeyId(entryKey) === keyId;
+/**
+ * Whether a configured entry, by id or by full key, applies to `keyId`. Keys are trimmed
+ * the way the backend trims them (Go's strings.TrimSpace, not String.prototype.trim)
+ * so the match agrees with the ids the usage report shows.
+ */
+const resolvesTo = (entryKey: string, keyId: string): boolean => {
+  const trimmed = trimSpaceLikeGo(entryKey);
+  return trimmed === keyId || clientKeyId(trimmed) === keyId;
+};
+
+/**
+ * Replaces every entry for `id` and writes the whole map back. Entries for other keys
+ * are written exactly as read, zero values and untrimmed keys included, so a save never
+ * alters another operator's configuration.
+ */
+const writeLimit = async (id: string, value: number | null): Promise<void> => {
+  const assertConnection = guardConfigConnection();
+  const raw = await readRawLimits();
+  assertConnection();
+  const entries = Object.entries(raw).filter(([entryKey]) => !resolvesTo(entryKey, id));
+  const limit = normalizeClientUsageLimit(value);
+  if (limit !== null) entries.push([id, limit]);
+  if (entries.length > 0) {
+    await apiClient.put(PATH, Object.fromEntries(entries));
+    return;
+  }
+  try {
+    await apiClient.delete(PATH);
+  } catch (error) {
+    // The field was already absent, which is the state being asked for.
+    if (!isMissingConfigValue(error)) throw error;
+  }
+};
+
+// Saves are read-modify-write of the whole map, so they run one after another: each
+// reads the map only after the previous save (from any row) has been written.
+let lastWrite: Promise<unknown> = Promise.resolve();
 
 export const clientUsageLimitsApi = {
   async get(): Promise<ClientUsageLimits> {
-    return Object.fromEntries(await readLimits());
+    const limits: ClientUsageLimits = {};
+    for (const [name, value] of Object.entries(await readRawLimits())) {
+      const key = name.trim();
+      const limit = toLimit(value);
+      if (key && limit !== null) limits[key] = limit;
+    }
+    return limits;
   },
 
   /** Sets or, with `null`/`0`, removes the allowance of the key with id `keyId`. */
   async set(keyId: string, value: number | null): Promise<void> {
     const id = keyId.trim();
     if (!id) throw new RangeError('Client key id is required');
-    const assertConnection = guardConfigConnection();
-    const current = await readLimits();
-    assertConnection();
-    const entries = current.filter(([entryKey]) => !resolvesTo(entryKey, id));
-    const limit = normalizeClientUsageLimit(value);
-    if (limit !== null) entries.push([id, limit]);
-    if (entries.length > 0) {
-      await apiClient.put(PATH, Object.fromEntries(entries));
-      return;
-    }
-    try {
-      await apiClient.delete(PATH);
-    } catch (error) {
-      // The field was already absent, which is the state being asked for.
-      if (!isMissingConfigValue(error)) throw error;
-    }
+    const write = lastWrite.then(() => writeLimit(id, value));
+    lastWrite = write.catch(() => undefined);
+    return write;
   },
 };
