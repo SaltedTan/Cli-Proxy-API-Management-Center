@@ -442,8 +442,8 @@ export function formatLimitMeterValues(
   const usedDigits = proUnitsDigits(status.used);
   const limitDigits = proUnitsDigits(status.limit);
   for (let extra = 0; Math.max(usedDigits, limitDigits) + extra <= 6; extra += 1) {
-    const used = Number(status.used.toFixed(usedDigits + extra));
-    const limit = Number(status.limit.toFixed(limitDigits + extra));
+    const used = roundAsDisplayed(status.used, usedDigits + extra);
+    const limit = roundAsDisplayed(status.limit, limitDigits + extra);
     if (used >= limit === status.reached) {
       return {
         used: formatDecimals(status.used, usedDigits + extra, locale),
@@ -464,6 +464,17 @@ function formatDecimals(value: number, digits: number, locale?: string): string 
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+/** The value `formatDecimals` shows, which rounds ties unlike `toFixed` (`0.245` → `0.25`). */
+function roundAsDisplayed(value: number, digits: number): number {
+  return Number(
+    value.toLocaleString('en-US', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+      useGrouping: false,
+    })
+  );
 }
 
 /** Plan allowances are exact (`1`, `1.25`, `10`). */

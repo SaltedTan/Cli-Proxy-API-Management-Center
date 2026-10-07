@@ -863,6 +863,9 @@ describe('client usage logic', () => {
     expect(meter(0.249999, 0.25, false)).toEqual({ used: '0.249999', limit: '0.250000' });
     expect(meter(9.996, 10, false)).toEqual({ used: '9.996', limit: '10.00' });
     expect(meter(0.2462, 0.25, false, 'ru')).toEqual({ used: '0,246', limit: '0,250' });
+    // Ties are compared as they are displayed, not as `toFixed` rounds them.
+    expect(meter(0.245, 0.25, false)).toEqual({ used: '0.245', limit: '0.250' });
+    expect(meter(0.2495, 0.25, false, 'ru')).toEqual({ used: '0,2495', limit: '0,2500' });
     expect(meter(0.28, 0.25, true)).toEqual({ used: '0.28', limit: '0.25' });
     expect(meter(0.25, 0.25, true)).toEqual({ used: '0.25', limit: '0.25' });
     // An older backend can disagree at any precision; the usual decimals are kept.
