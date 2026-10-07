@@ -32,6 +32,7 @@ import {
   clientUsageToday,
   formatClaudeLimitInput,
   formatLimitFraction,
+  formatLimitMeterValues,
   formatPlanAllowance,
   formatProUnits,
   parseClaudeLimitInput,
@@ -851,6 +852,21 @@ describe('client usage logic', () => {
     expect(at(0.7)).toBe('warning');
     expect(at(0.9)).toBe('critical');
     expect(at(0.1, true)).toBe('critical');
+    // The used / limit values agree with the backend's verdict, never with rounding.
+    const meter = (used: number, limit: number, reached: boolean, locale = 'en') =>
+      formatLimitMeterValues(
+        { limit, used, remaining: 0, fraction: 0, reached, resetsAtMs: null },
+        locale
+      );
+    expect(meter(0.84, 1.5, false)).toEqual({ used: '0.84', limit: '1.50' });
+    expect(meter(0.2462, 0.25, false)).toEqual({ used: '0.246', limit: '0.250' });
+    expect(meter(0.249999, 0.25, false)).toEqual({ used: '0.249999', limit: '0.250000' });
+    expect(meter(9.996, 10, false)).toEqual({ used: '9.996', limit: '10.00' });
+    expect(meter(0.2462, 0.25, false, 'ru')).toEqual({ used: '0,246', limit: '0,250' });
+    expect(meter(0.28, 0.25, true)).toEqual({ used: '0.28', limit: '0.25' });
+    expect(meter(0.25, 0.25, true)).toEqual({ used: '0.25', limit: '0.25' });
+    // An older backend can disagree at any precision; the usual decimals are kept.
+    expect(meter(0.25, 0.25, false)).toEqual({ used: '0.25', limit: '0.25' });
   });
 
   test('parses and formats the allowance editor text', () => {
@@ -1012,10 +1028,77 @@ describe('client usage panel rendering', () => {
     expect(unsupported).not.toContain(t('dashboard.client_usage_limit_none'));
   });
 
+  test('shows a key at its limit exactly when the backend says the limit is reached', () => {
+    const withLaptop = (overrides: Partial<ClientKeyClaudeUsage>) => ({
+      ...snapshot,
+      keys: snapshot.keys.map((entry) =>
+        entry.id === LAPTOP_ID && entry.claude
+          ? { ...entry, claude: claude({ ...entry.claude, limitProUnits: 0.25, ...overrides }) }
+          : entry
+      ),
+    });
+    const reachedBadges = (markup: string) =>
+      markup.match(new RegExp(t('dashboard.client_usage_limit_reached'), 'g'))?.length ?? 0;
+    // Two decimals would read 0.25 / 0.25 for a key that is still admitted: more are shown.
+    const under = renderPanel(
+      {
+        status: 'ready',
+        data: withLaptop({
+          currentProUnits: 0.2462,
+          remainingProUnits: 0.0038,
+          limitReached: false,
+        }),
+      },
+      onRefresh
+    );
+    expect(under).toContain('0.246 / 0.250 Pro');
+    expect(under).not.toContain('0.25 / 0.25 Pro');
+    // Down to the six decimals the backend reports.
+    const barelyUnder = renderPanel(
+      {
+        status: 'ready',
+        data: withLaptop({
+          currentProUnits: 0.249999,
+          remainingProUnits: 0.000001,
+          limitReached: false,
+        }),
+      },
+      onRefresh
+    );
+    expect(barelyUnder).toContain('0.249999 / 0.250000 Pro');
+    // Only the phone, which the backend reports as reached, carries the badge.
+    expect(reachedBadges(under)).toBe(1);
+    expect(reachedBadges(barelyUnder)).toBe(1);
+    // A reached key keeps the usual two decimals and gets the badge, from limit_reached alone.
+    const reached = renderPanel(
+      {
+        status: 'ready',
+        data: withLaptop({ currentProUnits: 0.25, remainingProUnits: 0, limitReached: true }),
+      },
+      onRefresh
+    );
+    expect(reached).toContain('0.25 / 0.25 Pro');
+    expect(reachedBadges(reached)).toBe(2);
+    // An older backend that says "not reached" at an equal value gets no badge.
+    const legacy = renderPanel(
+      {
+        status: 'ready',
+        data: withLaptop({ currentProUnits: 0.25, remainingProUnits: 0, limitReached: false }),
+      },
+      onRefresh
+    );
+    expect(reachedBadges(legacy)).toBe(1);
+  });
+
   test("offers to reset a key's open window and says when it resets", () => {
     const saveLimit = async () => undefined;
     const resetWindow = async () => undefined;
-    const markup = renderPanel({ status: 'ready', data: snapshot }, onRefresh, saveLimit, resetWindow);
+    const markup = renderPanel(
+      { status: 'ready', data: snapshot },
+      onRefresh,
+      saveLimit,
+      resetWindow
+    );
     // Keys with an open window get the control; keys without one do not.
     for (const name of ['MacBook', 'Phone']) {
       expect(markup).toContain(
@@ -1028,9 +1111,7 @@ describe('client usage panel rendering', () => {
       );
     }
     expect(markup).toContain(`title="${html(t('dashboard.client_usage_window_reset_hint'))}"`);
-    expect(markup.match(new RegExp(t('dashboard.client_usage_window_reset'), 'g'))).toHaveLength(
-      2
-    );
+    expect(markup.match(new RegExp(t('dashboard.client_usage_window_reset'), 'g'))).toHaveLength(2);
     // Confirmation is asked only after a click.
     expect(markup).not.toContain(
       html(t('dashboard.client_usage_window_reset_confirm', { name: 'MacBook' }))

@@ -29,6 +29,7 @@ import {
   clientUsageToday,
   formatClaudeLimitInput,
   formatLimitFraction,
+  formatLimitMeterValues,
   formatPlanAllowance,
   formatProUnits,
   parseClaudeLimitInput,
@@ -694,10 +695,7 @@ function ClaudeLimitCell({
           <span className={styles.limitText}>
             <span>
               {status
-                ? t('dashboard.client_usage_limit_meter', {
-                    used: formatProUnits(status.used, locale),
-                    limit: formatProUnits(status.limit, locale),
-                  })
+                ? t('dashboard.client_usage_limit_meter', formatLimitMeterValues(status, locale))
                 : t('dashboard.client_usage_limit_none')}
             </span>
             {onSave && (

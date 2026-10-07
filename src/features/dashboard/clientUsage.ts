@@ -356,7 +356,40 @@ export function claudePlanLabel(t: TFunction, plan: string, planSource: string):
 
 /** `0.84`, `2.31`, `12.5`: two decimals below 10 units, one above. */
 export function formatProUnits(value: number, locale?: string): string {
-  const digits = value >= 10 ? 1 : 2;
+  return formatDecimals(value, proUnitsDigits(value), locale);
+}
+
+/**
+ * The "used / limit" values of an allowance, with the usual decimals or, up to the six
+ * the backend reports, as many more as it takes for the values to agree with `reached`:
+ * a key the proxy still admits never reads as at its limit, and a refused key never
+ * reads as under it.
+ */
+export function formatLimitMeterValues(
+  status: ClaudeLimitStatus,
+  locale?: string
+): { used: string; limit: string } {
+  const usedDigits = proUnitsDigits(status.used);
+  const limitDigits = proUnitsDigits(status.limit);
+  for (let extra = 0; Math.max(usedDigits, limitDigits) + extra <= 6; extra += 1) {
+    const used = Number(status.used.toFixed(usedDigits + extra));
+    const limit = Number(status.limit.toFixed(limitDigits + extra));
+    if (used >= limit === status.reached) {
+      return {
+        used: formatDecimals(status.used, usedDigits + extra, locale),
+        limit: formatDecimals(status.limit, limitDigits + extra, locale),
+      };
+    }
+  }
+  // Values from an older backend may disagree at any precision; keep the usual one.
+  return { used: formatProUnits(status.used, locale), limit: formatProUnits(status.limit, locale) };
+}
+
+function proUnitsDigits(value: number): number {
+  return value >= 10 ? 1 : 2;
+}
+
+function formatDecimals(value: number, digits: number, locale?: string): string {
   return value.toLocaleString(locale, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
