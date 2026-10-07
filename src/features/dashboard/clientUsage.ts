@@ -1,41 +1,25 @@
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
 import type { TFunction } from 'i18next';
 import { apiKeyNameFingerprint } from '@/features/config/apiKeyNames';
+import { normalizeClientUsageLimit } from '@/services/api/clientUsageLimits';
 import type {
   ClientKeyClaudeCredentialUsage,
+  ClientKeyClaudeUsage,
   ClientKeyUsage,
   ClientUsageDay,
   ClientUsageModel,
   ClientUsageSnapshot,
 } from '@/types/clientUsage';
+import { ANONYMOUS_CLIENT_KEY_ID, clientKeyId } from '@/utils/clientKeyId';
 import { formatPercent } from '@/utils/format';
 import { DAY_MS } from '@/utils/time/durations';
 import type { MeterTone } from './utils';
 
-/** Requests without a client API key are grouped under this id. */
-export const ANONYMOUS_CLIENT_KEY_ID = 'anonymous';
+export { ANONYMOUS_CLIENT_KEY_ID, clientKeyId };
 
 /** Tokens and requests are summarized over this many server-local days, today included. */
 export const CLIENT_USAGE_WINDOW_DAYS = 7;
 
 const TOP_MODEL_COUNT = 3;
-
-// Go's strings.TrimSpace (unicode.IsSpace). Unlike String.prototype.trim it strips U+0085
-// and keeps U+FEFF, so key ids match the backend for every configured key.
-const GO_SPACE =
-  '[\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
-const GO_TRIM = new RegExp(`^${GO_SPACE}+|${GO_SPACE}+$`, 'g');
-
-/**
- * The backend's `KeyID`: the first 8 bytes of the SHA-256 of the trimmed key as 16
- * lowercase hex characters, or `anonymous` for an empty key.
- */
-export function clientKeyId(rawKey: string): string {
-  const key = rawKey.replace(GO_TRIM, '');
-  if (!key) return ANONYMOUS_CLIENT_KEY_ID;
-  return bytesToHex(sha256(new TextEncoder().encode(key)).subarray(0, 8));
-}
 
 /**
  * Maps key ids to the names the API keys editor saved in this browser. The editor
@@ -99,6 +83,8 @@ export function clientUsageToday(snapshot: ClientUsageSnapshot, nowMs: number): 
 export interface ClientUsageWindowTotals {
   requests: number;
   failed: number;
+  /** Refused by the key's Claude allowance. */
+  blocked: number;
   tokens: number;
 }
 
@@ -115,16 +101,85 @@ export function summarizeRecentDays(
       return {
         requests: totals.requests + day.requests,
         failed: totals.failed + day.failed,
+        blocked: totals.blocked + day.blocked,
         tokens: totals.tokens + day.tokens.total,
       };
     },
-    { requests: 0, failed: 0, tokens: 0 }
+    { requests: 0, failed: 0, blocked: 0, tokens: 0 }
   );
 }
 
-/** Whether a key has served or attempted anything since tracking started. */
+/** Whether a key has served, attempted or been refused anything since tracking started. */
 export const clientKeyHasUsage = (entry: ClientKeyUsage): boolean =>
-  entry.lastUsedAtMs !== null || entry.totals.requests + entry.totals.failed > 0;
+  entry.lastUsedAtMs !== null ||
+  entry.totals.requests + entry.totals.failed + entry.totals.blocked > 0;
+
+/**
+ * The backend reports `claude` for keys with Claude usage or a configured limit; only the
+ * former should read as Claude usage.
+ */
+const claudeUsed = (claude: ClientKeyClaudeUsage | null): claude is ClientKeyClaudeUsage =>
+  claude !== null &&
+  (claude.currentProUnits > 0 || claude.totalProUnits > 0 || claude.credentials.length > 0);
+
+export interface ClaudeLimitStatus {
+  /** Configured allowance in Pro units per weekly window. */
+  limit: number;
+  /** Pro units used in the open weekly windows. */
+  used: number;
+  remaining: number;
+  /** `used / limit`, capped at 1. */
+  fraction: number;
+  /** The proxy is refusing this key's Claude requests. */
+  reached: boolean;
+  /** When the earliest open window resets; null when unknown or already passed. */
+  resetsAtMs: number | null;
+}
+
+/** Null without a configured limit. A reset instant that has passed is treated as unknown. */
+export function claudeLimitStatus(
+  claude: ClientKeyClaudeUsage | null,
+  nowMs: number
+): ClaudeLimitStatus | null {
+  if (!claude || claude.limitProUnits === null || claude.limitProUnits <= 0) return null;
+  const limit = claude.limitProUnits;
+  const used = claude.currentProUnits;
+  const resetsAtMs =
+    claude.limitResetsAtMs !== null && claude.limitResetsAtMs > nowMs
+      ? claude.limitResetsAtMs
+      : null;
+  return {
+    limit,
+    used,
+    remaining: claude.remainingProUnits ?? Math.max(limit - used, 0),
+    fraction: Math.min(1, used / limit),
+    reached: claude.limitReached,
+    resetsAtMs,
+  };
+}
+
+/** A reached limit is critical even if rounding leaves the fraction under the thresholds. */
+export function claudeLimitTone(status: ClaudeLimitStatus): MeterTone {
+  return status.reached ? 'critical' : weeklyUtilizationTone(status.fraction);
+}
+
+/**
+ * Allowance editor text: a limit to set, `null` to clear (blank or 0), or `undefined`
+ * when the text is not a non-negative number.
+ */
+export function parseClaudeLimitInput(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) return undefined;
+  return normalizeClientUsageLimit(value);
+}
+
+/** Editor text for a configured allowance (`1.5`, `0.25`); blank without a limit. */
+export function formatClaudeLimitInput(limit: number | null): string {
+  const normalized = normalizeClientUsageLimit(limit);
+  return normalized === null ? '' : String(normalized);
+}
 
 export function topModels(
   models: readonly ClientUsageModel[],
@@ -154,6 +209,8 @@ export interface ClientUsageRow {
   claudeTotalProUnits: number;
   /** Share of all keys' Claude Pro units this week, 0–1; null without Claude usage. */
   claudeShare: number | null;
+  /** Null without a configured Claude allowance. */
+  claudeLimit: ClaudeLimitStatus | null;
   claudeCredentials: ClientKeyClaudeCredentialUsage[];
   topModels: ClientUsageModel[];
 }
@@ -162,15 +219,17 @@ export interface ClientUsageRowOptions {
   localNames: ReadonlyMap<string, string>;
   anonymousLabel: string;
   today: string;
+  /** Decides whether an allowance's reset instant is still ahead. */
+  nowMs: number;
 }
 
 /**
  * One row per key, heaviest Claude users first, then by 7-day tokens and name.
- * Configured keys that were never used go last.
+ * Configured keys that were never used go last, as do keys that only have a limit.
  */
 export function buildClientUsageRows(
   keys: readonly ClientKeyUsage[],
-  { localNames, anonymousLabel, today }: ClientUsageRowOptions
+  { localNames, anonymousLabel, today, nowMs }: ClientUsageRowOptions
 ): ClientUsageRow[] {
   const rows = keys.map<ClientUsageRow>((entry) => {
     const label = clientKeyLabel(entry, localNames, anonymousLabel);
@@ -184,9 +243,10 @@ export function buildClientUsageRows(
       used: clientKeyHasUsage(entry),
       lastUsedAtMs: entry.lastUsedAtMs,
       week: summarizeRecentDays(entry.daily, today),
-      claudeCurrentProUnits: entry.claude ? entry.claude.currentProUnits : null,
+      claudeCurrentProUnits: claudeUsed(entry.claude) ? entry.claude.currentProUnits : null,
       claudeTotalProUnits: entry.claude?.totalProUnits ?? 0,
       claudeShare: null,
+      claudeLimit: claudeLimitStatus(entry.claude, nowMs),
       claudeCredentials: [...(entry.claude?.credentials ?? [])].sort(
         (a, b) =>
           b.currentProUnits - a.currentProUnits ||

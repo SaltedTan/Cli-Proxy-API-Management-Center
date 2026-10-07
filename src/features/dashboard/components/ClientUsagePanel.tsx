@@ -1,9 +1,19 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
-import { IconChevronDown, IconRefreshCw } from '@/components/ui/icons';
+import { IconChevronDown, IconPencil, IconRefreshCw } from '@/components/ui/icons';
+import { useNotificationStore } from '@/stores/useNotificationStore';
 import type { ClaudeCredentialUsage } from '@/types/clientUsage';
 import { formatCompactNumber, formatPercent } from '@/utils/format';
 import { formatRelativeInstant } from '@/utils/quota/relativeTime';
@@ -11,12 +21,15 @@ import { createSharedClock } from '@/utils/time/sharedClock';
 import type { ClientUsageState } from '../hooks/useClientUsage';
 import {
   buildClientUsageRows,
+  claudeLimitTone,
   claudePlanLabel,
   clientUsageHints,
   clientUsageToday,
+  formatClaudeLimitInput,
   formatLimitFraction,
   formatPlanAllowance,
   formatProUnits,
+  parseClaudeLimitInput,
   weeklyUtilizationTone,
   type ClientUsageHint,
   type ClientUsageRow,
@@ -31,17 +44,28 @@ const API_KEYS_ROUTE = '/config?field=apiKeys';
 // Last-used and reset times only need coarse ticks.
 const clock = createSharedClock({ intervalMs: 30_000 });
 
+/** Writes a key's Claude allowance in Pro units per week; `null` removes it. */
+export type SaveClientLimit = (keyId: string, value: number | null) => Promise<void>;
+
 export interface ClientUsagePanelProps {
   usage: ClientUsageState;
   /** Names saved in this browser for configured keys, by key id. */
   localNames: ReadonlyMap<string, string>;
   /** Reloads this panel's data without the rest of the dashboard; omitted hides the button. */
   onRefresh?: () => Promise<void>;
+  /** Omitted (or a backend without `claude_limits_supported`) hides the allowance editor. */
+  onSaveLimit?: SaveClientLimit;
   /** Injected by tests; the live panel follows the shared clock. */
   nowMs?: number;
 }
 
-export function ClientUsagePanel({ usage, localNames, onRefresh, nowMs }: ClientUsagePanelProps) {
+export function ClientUsagePanel({
+  usage,
+  localNames,
+  onRefresh,
+  onSaveLimit,
+  nowMs,
+}: ClientUsagePanelProps) {
   const { t, i18n } = useTranslation();
   const tickMs = useSyncExternalStore(clock.subscribe, clock.getSnapshot, clock.getSnapshot);
   const now = nowMs ?? tickMs;
@@ -68,12 +92,15 @@ export function ClientUsagePanel({ usage, localNames, onRefresh, nowMs }: Client
             localNames,
             anonymousLabel,
             today: clientUsageToday(data, now),
+            nowMs: now,
           })
         : [],
     [data, localNames, anonymousLabel, now]
   );
   const hints = useMemo(() => (data ? clientUsageHints(data.keys) : []), [data]);
   const anyUsage = rows.some((row) => row.used);
+  // Older backends report usage but do not enforce limits; do not offer to edit them.
+  const saveLimit = data?.claudeLimitsSupported ? onSaveLimit : undefined;
 
   const formatDate = (ms: number) =>
     new Date(ms).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -148,7 +175,14 @@ export function ClientUsagePanel({ usage, localNames, onRefresh, nowMs }: Client
           </div>
           <ul className={styles.rows} aria-label={t('dashboard.client_usage_list_label')}>
             {rows.map((row) => (
-              <UsageRow key={row.id} row={row} t={t} locale={locale} now={now} />
+              <UsageRow
+                key={row.id}
+                row={row}
+                t={t}
+                locale={locale}
+                now={now}
+                onSaveLimit={saveLimit}
+              />
             ))}
           </ul>
         </div>
@@ -210,11 +244,13 @@ function UsageRow({
   t,
   locale,
   now,
+  onSaveLimit,
 }: {
   row: ClientUsageRow;
   t: TFunction;
   locale: string;
   now: number;
+  onSaveLimit?: SaveClientLimit;
 }) {
   const units = (value: number) =>
     t('dashboard.client_usage_pro_units', { value: formatProUnits(value, locale) });
@@ -227,6 +263,9 @@ function UsageRow({
     (credential) => credential.currentProUnits > 0 || credential.totalProUnits > 0
   );
   const hasDetails = claudeCredentials.length > 0 || row.topModels.length > 0;
+  // The allowance cell stays visible for unused keys, which otherwise collapse on phones.
+  const claudeMetricClass =
+    row.claudeLimit || onSaveLimit ? `${styles.metric} ${styles.limitMetric}` : styles.metric;
 
   return (
     <li className={row.used ? styles.row : `${styles.row} ${styles.unused}`}>
@@ -246,7 +285,7 @@ function UsageRow({
         </div>
 
         <dl className={styles.metrics}>
-          <div className={styles.metric}>
+          <div className={claudeMetricClass}>
             <dt className={styles.metricLabel}>{t('dashboard.client_usage_col_claude')}</dt>
             <dd className={styles.metricValue}>
               {row.claudeCurrentProUnits === null ? DASH : units(row.claudeCurrentProUnits)}
@@ -257,7 +296,8 @@ function UsageRow({
                 </span>
               )}
             </dd>
-            {row.claudeShare !== null && (
+            {/* With an allowance, the meter against it replaces the share-of-all-keys bar. */}
+            {row.claudeShare !== null && row.claudeLimit === null && (
               <dd className={styles.shareTrack} aria-hidden="true">
                 <span
                   className={styles.shareFill}
@@ -265,6 +305,7 @@ function UsageRow({
                 />
               </dd>
             )}
+            <ClaudeLimitCell row={row} t={t} locale={locale} now={now} onSave={onSaveLimit} />
           </div>
           <div className={styles.metric}>
             <dt className={styles.metricLabel}>{t('dashboard.client_usage_col_tokens')}</dt>
@@ -280,6 +321,13 @@ function UsageRow({
                 <span className={`${styles.metricAside} ${styles.failed}`}>
                   {t('dashboard.client_usage_failed', {
                     value: row.week.failed.toLocaleString(locale),
+                  })}
+                </span>
+              )}
+              {row.week.blocked > 0 && (
+                <span className={`${styles.metricAside} ${styles.blocked}`}>
+                  {t('dashboard.client_usage_blocked', {
+                    value: row.week.blocked.toLocaleString(locale),
                   })}
                 </span>
               )}
@@ -359,6 +407,199 @@ function UsageRow({
         </details>
       )}
     </li>
+  );
+}
+
+/**
+ * Allowance meter and "used / limit" line, with an inline editor when the backend
+ * enforces limits and the dashboard is connected. Enter saves, Escape cancels, and focus
+ * returns to the edit button when the editor closes.
+ */
+function ClaudeLimitCell({
+  row,
+  t,
+  locale,
+  now,
+  onSave,
+}: {
+  row: ClientUsageRow;
+  t: TFunction;
+  locale: string;
+  now: number;
+  onSave?: SaveClientLimit;
+}) {
+  const showNotification = useNotificationStore((state) => state.showNotification);
+  const status = row.claudeLimit;
+  const name = row.label.text;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [invalid, setInvalid] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
+  const hintId = useId();
+
+  useEffect(() => {
+    if (editing || !restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    triggerRef.current?.focus();
+  }, [editing]);
+
+  if (!status && !onSave) return null;
+
+  const openEditor = () => {
+    setDraft(formatClaudeLimitInput(status?.limit ?? null));
+    setInvalid(false);
+    setEditing(true);
+  };
+
+  const closeEditor = () => {
+    restoreFocusRef.current = true;
+    setEditing(false);
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onSave || saving) return;
+    const value = parseClaudeLimitInput(draft);
+    if (value === undefined) {
+      setInvalid(true);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(row.id, value);
+      closeEditor();
+    } catch {
+      // Stay open so the value can be corrected or retried.
+      showNotification(t('dashboard.client_usage_limit_save_error'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && !saving) {
+      event.preventDefault();
+      closeEditor();
+    }
+  };
+
+  const editLabel = t('dashboard.client_usage_limit_edit', { name });
+
+  return (
+    <>
+      {status && (
+        <dd className={styles.limitMeter}>
+          <Meter
+            value={status.fraction * 100}
+            tone={claudeLimitTone(status)}
+            ariaLabel={t('dashboard.client_usage_limit_meter_label', { name })}
+          />
+        </dd>
+      )}
+      <dd className={styles.limit}>
+        {editing && onSave ? (
+          <form className={styles.limitEditor} onSubmit={(event) => void handleSubmit(event)}>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.05"
+              min="0"
+              className={`input ${styles.limitInput}`}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setInvalid(false);
+              }}
+              onKeyDown={handleKeyDown}
+              onFocus={(event) => event.currentTarget.select()}
+              disabled={saving}
+              autoFocus
+              aria-label={t('dashboard.client_usage_limit_input_label', { name })}
+              aria-describedby={hintId}
+              aria-invalid={invalid || undefined}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              className={styles.limitAction}
+              loading={saving}
+              aria-label={t('dashboard.client_usage_limit_save', { name })}
+            >
+              {t('common.save')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={styles.limitAction}
+              onClick={closeEditor}
+              disabled={saving}
+              aria-label={t('dashboard.client_usage_limit_cancel', { name })}
+            >
+              {t('common.cancel')}
+            </Button>
+            <span
+              id={hintId}
+              className={
+                invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint
+              }
+            >
+              {t(
+                invalid
+                  ? 'dashboard.client_usage_limit_invalid'
+                  : 'dashboard.client_usage_limit_hint'
+              )}
+            </span>
+          </form>
+        ) : (
+          <span className={styles.limitText}>
+            <span>
+              {status
+                ? t('dashboard.client_usage_limit_meter', {
+                    used: formatProUnits(status.used, locale),
+                    limit: formatProUnits(status.limit, locale),
+                  })
+                : t('dashboard.client_usage_limit_none')}
+            </span>
+            {onSave && (
+              <Button
+                ref={triggerRef}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={styles.limitEdit}
+                onClick={openEditor}
+                aria-label={editLabel}
+                title={editLabel}
+              >
+                <IconPencil size={12} aria-hidden="true" />
+              </Button>
+            )}
+          </span>
+        )}
+        {status?.reached && (
+          <span className={`${styles.badge} ${styles.limitReached}`}>
+            {t('dashboard.client_usage_limit_reached')}
+            {status.resetsAtMs !== null && (
+              <>
+                {' · '}
+                <time
+                  dateTime={new Date(status.resetsAtMs).toISOString()}
+                  title={new Date(status.resetsAtMs).toLocaleString(locale)}
+                >
+                  {t('dashboard.client_usage_resets', {
+                    time: formatRelativeInstant(status.resetsAtMs, now, locale),
+                  })}
+                </time>
+              </>
+            )}
+          </span>
+        )}
+      </dd>
+    </>
   );
 }
 

@@ -5,6 +5,7 @@ import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
 import { useRoutingObservability } from './useRoutingObservability';
 import { useClientUsage } from './useClientUsage';
+import { clientUsageLimitsApi } from '@/services/api/clientUsageLimits';
 import { readApiKeyNames } from '@/features/config/apiKeyNames';
 import { buildLocalKeyNames } from '../clientUsage';
 import {
@@ -183,6 +184,18 @@ export function useDashboardOverview() {
     refreshClientUsage,
   ]);
 
+  /**
+   * Writes a key's Claude allowance (`null` clears it), then reloads the usage panel. The
+   * limit lives in the access section the config store caches, so that is refreshed too.
+   */
+  const saveClientLimit = useCallback(
+    async (keyId: string, value: number | null) => {
+      await clientUsageLimitsApi.set(keyId, value);
+      await Promise.allSettled([refreshClientUsage(), fetchConfig(true)]);
+    },
+    [refreshClientUsage, fetchConfig]
+  );
+
   /** Scoped to the routing panel: its pool card is derived from auth-file cooldowns. */
   const refreshRoutingPanel = useCallback(async () => {
     if (!connected) return;
@@ -328,5 +341,6 @@ export function useDashboardOverview() {
     refresh,
     refreshRoutingPanel,
     refreshClientUsage,
+    saveClientLimit,
   };
 }

@@ -29,6 +29,12 @@ const toCount = (value: unknown): number =>
 const toAmount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 
+/** An allowance is only meaningful when positive; anything else means "no limit". */
+const toOptionalAmount = (value: unknown): number | null => {
+  const amount = toAmount(value);
+  return amount > 0 ? amount : null;
+};
+
 const toTimeMs = (value: unknown): number | null => {
   if (typeof value !== 'string' || !value.trim()) return null;
   const parsed = Date.parse(value);
@@ -53,6 +59,7 @@ const normalizeCounters = (raw: unknown): ClientUsageCounters => {
   return {
     requests: toCount(source.requests),
     failed: toCount(source.failed),
+    blocked: toCount(source.blocked),
     tokens: normalizeTokens(source.tokens),
   };
 };
@@ -107,9 +114,23 @@ const normalizeKeyClaude = (raw: unknown): ClientKeyClaudeUsage | null => {
         .map(normalizeKeyClaudeCredential)
         .filter((entry): entry is ClientKeyClaudeCredentialUsage => entry !== null)
     : [];
+  const currentProUnits = toAmount(raw.current_pro_units);
+  const limitProUnits = toOptionalAmount(raw.limit_pro_units);
+  const reportedRemaining = raw.remaining_pro_units;
+  // Older backends omit the remaining units; derive them from the limit when needed.
+  const remainingProUnits =
+    limitProUnits === null
+      ? null
+      : typeof reportedRemaining === 'number' && Number.isFinite(reportedRemaining)
+        ? Math.max(reportedRemaining, 0)
+        : Math.max(limitProUnits - currentProUnits, 0);
   return {
-    currentProUnits: toAmount(raw.current_pro_units),
+    currentProUnits,
     totalProUnits: toAmount(raw.total_pro_units),
+    limitProUnits,
+    remainingProUnits,
+    limitReached: raw.limit_reached === true,
+    limitResetsAtMs: toTimeMs(raw.limit_resets_at),
     credentials,
   };
 };
@@ -181,6 +202,7 @@ export const normalizeClientUsage = (raw: unknown): ClientUsageSnapshot => {
     sinceMs: toTimeMs(source.since),
     keys,
     claudeCredentials,
+    claudeLimitsSupported: source.claude_limits_supported === true,
   };
 };
 

@@ -22,19 +22,24 @@ import {
   ANONYMOUS_CLIENT_KEY_ID,
   buildClientUsageRows,
   buildLocalKeyNames,
+  claudeLimitStatus,
+  claudeLimitTone,
   claudePlanLabel,
   clientKeyId,
   clientKeyLabel,
   clientUsageHints,
   clientUsageToday,
+  formatClaudeLimitInput,
   formatLimitFraction,
   formatPlanAllowance,
   formatProUnits,
+  parseClaudeLimitInput,
   summarizeRecentDays,
   titleCasePlan,
   topModels,
 } from '@/features/dashboard/clientUsage';
-import type { ClientKeyUsage, ClientUsageDay } from '@/types/clientUsage';
+import { clientKeyId as sharedClientKeyId } from '@/utils/clientKeyId';
+import type { ClientKeyClaudeUsage, ClientKeyUsage, ClientUsageDay } from '@/types/clientUsage';
 
 const i18n = createInstance();
 await i18n.init({
@@ -53,6 +58,8 @@ const LAPTOP_ID = clientKeyId(LAPTOP_KEY);
 const PHONE_ID = clientKeyId(PHONE_KEY);
 const DESKTOP_ID = clientKeyId(DESKTOP_KEY);
 const REMOVED_ID = 'c0ffee00c0ffee00';
+// Has an allowance configured by id but has never sent a request.
+const LIMIT_ONLY_ID = 'ab1e00ab1e00ab1e';
 const API_BASE = 'http://127.0.0.1:18920';
 
 const NOW = Date.parse('2026-10-07T12:00:00Z');
@@ -63,6 +70,7 @@ const rawSnapshot = {
   // Go encodes the server's own UTC offset, so the date part is the server-local date.
   generated_at: '2026-10-07T23:00:00.123456789+11:00',
   since: '2026-10-01T08:00:00Z',
+  claude_limits_supported: true,
   keys: [
     {
       id: LAPTOP_ID,
@@ -73,6 +81,7 @@ const rawSnapshot = {
       totals: {
         requests: 160,
         failed: 3,
+        blocked: 3,
         tokens: {
           input_tokens: 3_000_000,
           output_tokens: 500_000,
@@ -91,8 +100,9 @@ const rawSnapshot = {
         broken: 'not counters',
       },
       daily: [
-        { date: '2026-10-07', requests: 10, failed: 1, tokens: tokens(500_000) },
-        { date: '2026-09-30', requests: 100, failed: 0, tokens: tokens(1_000_000) },
+        { date: '2026-10-07', requests: 10, failed: 1, blocked: 2, tokens: tokens(500_000) },
+        { date: '2026-09-30', requests: 100, failed: 0, blocked: 9, tokens: tokens(1_000_000) },
+        { date: '2026-10-05', requests: 0, failed: 0, blocked: 1, tokens: {} },
         { date: '2026-10-01', requests: 50, failed: 2, tokens: tokens(2_000_000) },
         { date: 'yesterday', requests: 999 },
         null,
@@ -100,6 +110,10 @@ const rawSnapshot = {
       claude: {
         current_pro_units: 0.84,
         total_pro_units: 2.31,
+        limit_pro_units: 1.5,
+        remaining_pro_units: 0.66,
+        limit_reached: false,
+        limit_resets_at: '2026-10-09T15:00:00Z',
         credentials: [
           {
             auth_id: 'claude-personal.json',
@@ -130,6 +144,10 @@ const rawSnapshot = {
       claude: {
         current_pro_units: 0.28,
         total_pro_units: 0.28,
+        limit_pro_units: 0.25,
+        remaining_pro_units: 0,
+        limit_reached: true,
+        limit_resets_at: '2026-10-10T00:00:00Z',
         credentials: [
           {
             auth_id: 'claude-team.json',
@@ -159,6 +177,19 @@ const rawSnapshot = {
       last_used_at: '2026-09-20T10:00:00Z',
       totals: { requests: 7, failed: -2, tokens: tokens(7000) },
       daily: [{ date: '2026-09-20', requests: 7, tokens: tokens(7000) }],
+    },
+    {
+      id: LIMIT_ONLY_ID,
+      configured: false,
+      totals: { requests: 0, failed: 0, blocked: 0, tokens: {} },
+      claude: {
+        current_pro_units: 0,
+        total_pro_units: 0,
+        limit_pro_units: 2,
+        remaining_pro_units: 2,
+        limit_reached: false,
+        credentials: [],
+      },
     },
     { id: PHONE_ID, name: 'Duplicate id' },
     { name: 'No id' },
@@ -216,10 +247,17 @@ const noTokens = (total = 0) => ({
   total,
 });
 
-const day = (date: string, requests: number, total: number, failed = 0): ClientUsageDay => ({
+const day = (
+  date: string,
+  requests: number,
+  total: number,
+  failed = 0,
+  blocked = 0
+): ClientUsageDay => ({
   date,
   requests,
   failed,
+  blocked,
   tokens: noTokens(total),
 });
 
@@ -227,17 +265,34 @@ const key = (overrides: Partial<ClientKeyUsage> & { id: string }): ClientKeyUsag
   configured: true,
   firstUsedAtMs: null,
   lastUsedAtMs: null,
-  totals: { requests: 0, failed: 0, tokens: noTokens() },
+  totals: { requests: 0, failed: 0, blocked: 0, tokens: noTokens() },
   models: [],
   daily: [],
   claude: null,
   ...overrides,
 });
 
+const claude = (overrides: Partial<ClientKeyClaudeUsage> = {}): ClientKeyClaudeUsage => ({
+  currentProUnits: 0,
+  totalProUnits: 0,
+  limitProUnits: null,
+  remainingProUnits: null,
+  limitReached: false,
+  limitResetsAtMs: null,
+  credentials: [],
+  ...overrides,
+});
+
 const used = (id: string, configured = true): ClientKeyUsage =>
   key({ id, configured, lastUsedAtMs: NOW - 60_000 });
 
-const renderPanel = (usage: ClientUsageState, onRefresh?: () => Promise<void>) =>
+const rowOptions = { localNames, anonymousLabel, today: '2026-10-07', nowMs: NOW };
+
+const renderPanel = (
+  usage: ClientUsageState,
+  onRefresh?: () => Promise<void>,
+  onSaveLimit?: (keyId: string, value: number | null) => Promise<void>
+) =>
   renderToStaticMarkup(
     createElement(
       I18nextProvider,
@@ -245,7 +300,7 @@ const renderPanel = (usage: ClientUsageState, onRefresh?: () => Promise<void>) =
       createElement(
         MemoryRouter,
         null,
-        createElement(ClientUsagePanel, { usage, localNames, onRefresh, nowMs: NOW })
+        createElement(ClientUsagePanel, { usage, localNames, onRefresh, onSaveLimit, nowMs: NOW })
       )
     )
   );
@@ -279,6 +334,7 @@ describe('client usage API', () => {
       expect(laptop.totals).toEqual({
         requests: 160,
         failed: 3,
+        blocked: 3,
         tokens: {
           input: 3_000_000,
           output: 500_000,
@@ -328,10 +384,16 @@ describe('client usage API', () => {
       PHONE_ID,
       DESKTOP_ID,
       REMOVED_ID,
+      LIMIT_ONLY_ID,
     ]);
     expect(snapshot.keys[1].name).toBe('Phone');
     const laptop = snapshot.keys[0];
-    expect(laptop.daily.map((day) => day.date)).toEqual(['2026-09-30', '2026-10-01', '2026-10-07']);
+    expect(laptop.daily.map((day) => day.date)).toEqual([
+      '2026-09-30',
+      '2026-10-01',
+      '2026-10-05',
+      '2026-10-07',
+    ]);
     expect(laptop.models.map((model) => model.model)).toEqual([
       'claude-sonnet-4-5',
       'gpt-5',
@@ -372,6 +434,77 @@ describe('client usage API', () => {
     expect(normalizeClientUsage({ generated_at: 'not a time' }).serverDate).toBeNull();
   });
 
+  test('reads Claude allowance fields and tolerates backends without them', () => {
+    expect(snapshot.claudeLimitsSupported).toBe(true);
+    expect(snapshot.keys[0].claude).toMatchObject({
+      limitProUnits: 1.5,
+      remainingProUnits: 0.66,
+      limitReached: false,
+      limitResetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
+    });
+    expect(snapshot.keys[0].daily.map((day) => day.blocked)).toEqual([9, 0, 1, 2]);
+    expect(snapshot.keys[1].claude).toMatchObject({ remainingProUnits: 0, limitReached: true });
+    // A key that only has a limit still arrives, with the limit and no usage.
+    expect(snapshot.keys[4]).toMatchObject({
+      configured: false,
+      lastUsedAtMs: null,
+      claude: { currentProUnits: 0, limitProUnits: 2, remainingProUnits: 2, credentials: [] },
+    });
+
+    // Older backends omit every new field.
+    const older = normalizeClientUsage({
+      keys: [{ id: 'k', totals: { requests: 1 }, claude: { current_pro_units: 0.5 } }],
+    });
+    expect(older.claudeLimitsSupported).toBe(false);
+    expect(older.keys[0].totals.blocked).toBe(0);
+    expect(older.keys[0].claude).toEqual({
+      currentProUnits: 0.5,
+      totalProUnits: 0,
+      limitProUnits: null,
+      remainingProUnits: null,
+      limitReached: false,
+      limitResetsAtMs: null,
+      credentials: [],
+    });
+
+    // Malformed values default like the other fields; remaining units are derived.
+    const odd = normalizeClientUsage({
+      claude_limits_supported: 'yes',
+      keys: [
+        {
+          id: 'a',
+          totals: { blocked: -4 },
+          daily: [{ date: '2026-10-07', blocked: 2.9 }],
+          claude: {
+            current_pro_units: 0.5,
+            limit_pro_units: 2,
+            remaining_pro_units: 'lots',
+            limit_reached: 'yes',
+            limit_resets_at: 'soon',
+          },
+        },
+        { id: 'b', claude: { current_pro_units: 3, limit_pro_units: 2, remaining_pro_units: -1 } },
+        { id: 'c', claude: { limit_pro_units: -1, remaining_pro_units: 3, limit_reached: true } },
+        { id: 'd', claude: { limit_pro_units: 0 } },
+        { id: 'e', claude: { limit_pro_units: '1.5' } },
+      ],
+    });
+    expect(odd.claudeLimitsSupported).toBe(false);
+    expect(odd.keys[0].totals.blocked).toBe(0);
+    expect(odd.keys[0].daily[0].blocked).toBe(2);
+    expect(odd.keys[0].claude).toMatchObject({
+      limitProUnits: 2,
+      remainingProUnits: 1.5,
+      limitReached: false,
+      limitResetsAtMs: null,
+    });
+    expect(odd.keys[1].claude).toMatchObject({ limitProUnits: 2, remainingProUnits: 0 });
+    for (const entry of odd.keys.slice(2)) {
+      expect(entry.claude).toMatchObject({ limitProUnits: null, remainingProUnits: null });
+    }
+    expect(odd.keys[2].claude?.limitReached).toBe(true);
+  });
+
   test('tells a missing endpoint apart from other failures', () => {
     const notFound = Object.assign(new Error('not found'), { status: 404 });
     expect(isClientUsageUnsupported(notFound)).toBe(true);
@@ -387,6 +520,8 @@ describe('client key ids', () => {
     createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 16);
 
   test('match the backend SHA-256 prefix', () => {
+    // The dashboard re-exports the shared helper the config API also uses.
+    expect(clientKeyId).toBe(sharedClientKeyId);
     for (const value of [LAPTOP_KEY, PHONE_KEY, DESKTOP_KEY, 'fixture-ключ-π', 'x']) {
       expect(clientKeyId(value)).toBe(nodeKeyId(value));
       expect(clientKeyId(value)).toMatch(/^[0-9a-f]{16}$/);
@@ -439,19 +574,25 @@ describe('client usage logic', () => {
 
   test('sums the last seven server-local days', () => {
     const daily = [
-      day('2026-09-26', 1000, 1000),
-      day('2026-09-27', 1, 10, 1),
+      day('2026-09-26', 1000, 1000, 0, 500),
+      day('2026-09-27', 1, 10, 1, 4),
       day('2026-09-30', 2, 20),
-      day('2026-10-03', 4, 40, 2),
-      day('2026-10-04', 8000, 8000),
+      day('2026-10-03', 4, 40, 2, 1),
+      day('2026-10-04', 8000, 8000, 0, 600),
     ];
     // The window crosses a month boundary and excludes days after "today".
     expect(summarizeRecentDays(daily, '2026-10-03')).toEqual({
       requests: 7,
       failed: 3,
+      blocked: 5,
       tokens: 70,
     });
-    expect(summarizeRecentDays([], '2026-10-03')).toEqual({ requests: 0, failed: 0, tokens: 0 });
+    expect(summarizeRecentDays([], '2026-10-03')).toEqual({
+      requests: 0,
+      failed: 0,
+      blocked: 0,
+      tokens: 0,
+    });
     expect(clientUsageToday(snapshot, NOW)).toBe('2026-10-07');
     expect(clientUsageToday({ ...snapshot, serverDate: null, generatedAtMs: null }, NOW)).toMatch(
       /^2026-10-0[78]$/
@@ -459,20 +600,18 @@ describe('client usage logic', () => {
   });
 
   test('sorts by Claude usage, then 7-day tokens and name, with unused keys last', () => {
-    const rows = buildClientUsageRows(snapshot.keys, {
-      localNames,
-      anonymousLabel,
-      today: '2026-10-07',
-    });
+    const rows = buildClientUsageRows(snapshot.keys, rowOptions);
+    // A key that only has a limit sorts with the unused keys.
     expect(rows.map((row) => row.label.text)).toEqual([
       'MacBook',
       'Phone',
       REMOVED_ID,
+      LIMIT_ONLY_ID,
       'fixt...ktop',
     ]);
-    const [laptop, phone, removed, desktop] = rows;
+    const [laptop, phone, removed, limitOnly, desktop] = rows;
     expect(laptop.secondary).toBe('fixt...ptop');
-    expect(laptop.week).toEqual({ requests: 60, failed: 3, tokens: 2_500_000 });
+    expect(laptop.week).toEqual({ requests: 60, failed: 3, blocked: 3, tokens: 2_500_000 });
     expect(laptop.claudeShare).toBeCloseTo(0.75, 10);
     expect(phone.claudeShare).toBeCloseTo(0.25, 10);
     expect(removed).toMatchObject({
@@ -480,9 +619,28 @@ describe('client usage logic', () => {
       used: true,
       claudeCurrentProUnits: null,
       claudeShare: null,
-      week: { requests: 0, failed: 0, tokens: 0 },
+      claudeLimit: null,
+      week: { requests: 0, failed: 0, blocked: 0, tokens: 0 },
     });
-    expect(desktop).toMatchObject({ used: false, secondary: undefined, claudeShare: null });
+    expect(limitOnly).toMatchObject({
+      configured: false,
+      used: false,
+      claudeCurrentProUnits: null,
+      claudeShare: null,
+      claudeLimit: { limit: 2, used: 0, remaining: 2, fraction: 0, reached: false },
+    });
+    expect(desktop).toMatchObject({
+      used: false,
+      secondary: undefined,
+      claudeShare: null,
+      claudeLimit: null,
+    });
+    // Refused requests count as use of the key.
+    const [blockedOnly] = buildClientUsageRows(
+      [key({ id: 'x', totals: { requests: 0, failed: 0, blocked: 2, tokens: noTokens() } })],
+      rowOptions
+    );
+    expect(blockedOnly.used).toBe(true);
     expect(laptop.topModels.map((model) => model.model)).toEqual([
       'claude-sonnet-4-5',
       'gpt-5',
@@ -501,7 +659,7 @@ describe('client usage logic', () => {
         key({ id: 'c', name: 'Gamma', lastUsedAtMs: NOW }),
         key({ id: 'z', name: 'Aardvark' }),
       ],
-      { localNames, anonymousLabel, today: '2026-10-07' }
+      rowOptions
     );
     expect(tie.map((row) => row.label.text)).toEqual(['Alpha', 'Beta', 'Gamma', 'Aardvark']);
     expect(tie.every((row) => row.claudeShare === null)).toBe(true);
@@ -525,7 +683,7 @@ describe('client usage logic', () => {
           },
         ],
       }).keys,
-      { localNames, anonymousLabel, today: '2026-10-07' }
+      rowOptions
     );
     expect(multi.claudeCredentials.map((credential) => credential.label)).toEqual([
       'Large',
@@ -547,6 +705,83 @@ describe('client usage logic', () => {
     expect(
       clientUsageHints([used(REMOVED_ID, false), used(ANONYMOUS_CLIENT_KEY_ID, false)])
     ).toEqual([{ kind: 'no-keys' }, { kind: 'removed-keys', count: 1 }]);
+  });
+
+  test('reads a Claude allowance against current usage', () => {
+    const laptop = snapshot.keys[0].claude;
+    const status = claudeLimitStatus(laptop, NOW);
+    expect(status).toMatchObject({
+      limit: 1.5,
+      used: 0.84,
+      remaining: 0.66,
+      reached: false,
+      resetsAtMs: Date.parse('2026-10-09T15:00:00Z'),
+    });
+    expect(status?.fraction).toBeCloseTo(0.56, 10);
+    expect(claudeLimitTone(status!)).toBe('good');
+    // Over the limit: capped fraction, reached as the backend says.
+    const phone = claudeLimitStatus(snapshot.keys[1].claude, NOW);
+    expect(phone).toMatchObject({
+      limit: 0.25,
+      used: 0.28,
+      remaining: 0,
+      fraction: 1,
+      reached: true,
+    });
+    expect(claudeLimitTone(phone!)).toBe('critical');
+    // A reset instant that has passed is unknown until the next snapshot.
+    expect(
+      claudeLimitStatus(claude({ ...laptop, limitResetsAtMs: NOW - 1 }), NOW)?.resetsAtMs
+    ).toBe(null);
+    expect(
+      claudeLimitStatus(claude({ ...laptop, limitResetsAtMs: NOW + 1 }), NOW)?.resetsAtMs
+    ).toBe(NOW + 1);
+    // Remaining units are derived when the backend leaves them out.
+    expect(
+      claudeLimitStatus(claude({ ...laptop, remainingProUnits: null }), NOW)?.remaining
+    ).toBeCloseTo(0.66, 10);
+    expect(
+      claudeLimitStatus(
+        claude({ currentProUnits: 3, limitProUnits: 2, remainingProUnits: null }),
+        NOW
+      )
+    ).toMatchObject({ remaining: 0, fraction: 1 });
+    // No limit, no status.
+    expect(claudeLimitStatus(null, NOW)).toBeNull();
+    expect(claudeLimitStatus(claude({ currentProUnits: 1 }), NOW)).toBeNull();
+    expect(claudeLimitStatus(claude({ limitProUnits: 0 }), NOW)).toBeNull();
+    // The tone follows the weekly utilization thresholds unless the limit is reached.
+    const at = (fraction: number, reached = false) =>
+      claudeLimitTone({
+        limit: 1,
+        used: fraction,
+        remaining: 0,
+        fraction,
+        reached,
+        resetsAtMs: null,
+      });
+    expect(at(0.69)).toBe('good');
+    expect(at(0.7)).toBe('warning');
+    expect(at(0.9)).toBe('critical');
+    expect(at(0.1, true)).toBe('critical');
+  });
+
+  test('parses and formats the allowance editor text', () => {
+    expect(parseClaudeLimitInput('')).toBeNull();
+    expect(parseClaudeLimitInput('  ')).toBeNull();
+    expect(parseClaudeLimitInput('0')).toBeNull();
+    expect(parseClaudeLimitInput('0.004')).toBeNull();
+    expect(parseClaudeLimitInput('1.5')).toBe(1.5);
+    expect(parseClaudeLimitInput(' 1.234 ')).toBe(1.23);
+    expect(parseClaudeLimitInput('10')).toBe(10);
+    for (const invalid of ['-1', 'abc', '1e400', 'NaN', '1,5']) {
+      expect(parseClaudeLimitInput(invalid)).toBeUndefined();
+    }
+    expect(formatClaudeLimitInput(null)).toBe('');
+    expect(formatClaudeLimitInput(0)).toBe('');
+    expect(formatClaudeLimitInput(1.5)).toBe('1.5');
+    expect(formatClaudeLimitInput(2)).toBe('2');
+    expect(formatClaudeLimitInput(0.1 + 0.2)).toBe('0.3');
   });
 
   test('labels plans and formats Pro units', () => {
@@ -595,9 +830,9 @@ describe('client usage panel rendering', () => {
     expect(markup).toContain('0.84 Pro');
     expect(markup).toContain('<span aria-hidden="true">75%</span>');
     expect(markup).toContain(html(t('dashboard.client_usage_share_label', { value: '75%' })));
-    expect(markup).toContain('style="width:75%"');
     expect(markup).toContain('2.5M');
     expect(markup).toContain(t('dashboard.client_usage_failed', { value: '3' }));
+    expect(markup).toContain(t('dashboard.client_usage_blocked', { value: '3' }));
     expect(markup).toContain('5 minutes ago');
     expect(markup).toContain(t('dashboard.client_usage_unused'));
     // Per-credential breakdown and top models.
@@ -621,6 +856,67 @@ describe('client usage panel rendering', () => {
     expect(markup).not.toContain(t('dashboard.client_usage_hint_shared_key'));
     expect(markup).not.toContain('dashboard.client_usage_');
     expect(markup).not.toContain('claude_quota.');
+  });
+
+  test("shows each key's Claude allowance and offers to edit it when supported", () => {
+    const saveLimit = async () => undefined;
+    const markup = renderPanel({ status: 'ready', data: snapshot }, onRefresh, saveLimit);
+    // Meter against the allowance, used / limit, and the reached badge with its countdown.
+    expect(markup).toContain(
+      `aria-valuenow="56" aria-label="${t('dashboard.client_usage_limit_meter_label', { name: 'MacBook' })}"`
+    );
+    expect(markup).toContain('0.84 / 1.50 Pro');
+    expect(markup).toContain('aria-valuenow="100"');
+    expect(markup).toContain('0.28 / 0.25 Pro');
+    expect(markup).toMatch(
+      new RegExp(
+        `${t('dashboard.client_usage_limit_reached')} · <time [^>]*>resets in 2 days</time>`
+      )
+    );
+    expect(markup.match(new RegExp(t('dashboard.client_usage_limit_reached'), 'g'))).toHaveLength(
+      1
+    );
+    // A limit-only key is listed with its allowance and no usage.
+    expect(markup).toContain(LIMIT_ONLY_ID);
+    expect(markup).toContain('0.00 / 2.00 Pro');
+    // The share-of-all-keys bar gives way to the allowance meter; it stays without a limit.
+    expect(markup).not.toContain('style="width:75%"');
+    const unlimited = {
+      ...snapshot,
+      keys: snapshot.keys.map((entry) =>
+        entry.id === LAPTOP_ID && entry.claude
+          ? { ...entry, claude: claude({ ...entry.claude, limitProUnits: null }) }
+          : entry
+      ),
+    };
+    const unlimitedMarkup = renderPanel({ status: 'ready', data: unlimited }, onRefresh, saveLimit);
+    expect(unlimitedMarkup).toContain('style="width:75%"');
+    expect(unlimitedMarkup).not.toContain('0.84 / 1.50 Pro');
+    expect(unlimitedMarkup).toContain('0.28 / 0.25 Pro');
+    // Every row, including unlimited ones, can be edited.
+    for (const name of ['MacBook', 'Phone', REMOVED_ID, LIMIT_ONLY_ID, 'fixt...ktop']) {
+      expect(markup).toContain(`aria-label="${t('dashboard.client_usage_limit_edit', { name })}"`);
+    }
+    expect(markup).toContain(t('dashboard.client_usage_limit_none'));
+    expect(markup).not.toContain('<input');
+    expect(markup).not.toContain('dashboard.client_usage_');
+
+    // Without a save handler (disconnected) the allowance is read-only.
+    const readOnly = renderPanel({ status: 'ready', data: snapshot }, onRefresh);
+    expect(readOnly).toContain('0.84 / 1.50 Pro');
+    expect(readOnly).toContain(t('dashboard.client_usage_limit_reached'));
+    expect(readOnly).not.toContain('<button class="btn btn-ghost btn-sm');
+    expect(readOnly).not.toContain(t('dashboard.client_usage_limit_none'));
+
+    // A backend that reports usage but does not enforce limits gets no editor either.
+    const unsupported = renderPanel(
+      { status: 'ready', data: { ...snapshot, claudeLimitsSupported: false } },
+      onRefresh,
+      saveLimit
+    );
+    expect(unsupported).toContain('0.84 / 1.50 Pro');
+    expect(unsupported).not.toContain('<button class="btn btn-ghost btn-sm');
+    expect(unsupported).not.toContain(t('dashboard.client_usage_limit_none'));
   });
 
   test('asks for one key per device when all devices share one', () => {
@@ -693,6 +989,22 @@ describe('client usage panel rendering', () => {
     ).text();
     const refresh = source.slice(source.indexOf('const refresh = useCallback'));
     expect(refresh.slice(0, refresh.indexOf('}, ['))).toContain('refreshClientUsage()');
+  });
+
+  test('saving an allowance writes the config, then reloads usage and the config cache', async () => {
+    const source = await Bun.file(
+      new URL('../src/features/dashboard/hooks/useDashboardOverview.ts', import.meta.url)
+    ).text();
+    const save = source.slice(source.indexOf('const saveClientLimit = useCallback'));
+    const body = save.slice(0, save.indexOf('}, ['));
+    const write = body.indexOf('await clientUsageLimitsApi.set(keyId, value)');
+    expect(write).toBeGreaterThan(-1);
+    expect(body.indexOf('refreshClientUsage()')).toBeGreaterThan(write);
+    expect(body.indexOf('fetchConfig(true)')).toBeGreaterThan(write);
+    const page = await Bun.file(
+      new URL('../src/features/dashboard/DashboardPage.tsx', import.meta.url)
+    ).text();
+    expect(page).toContain('onSaveLimit={connected ? saveClientLimit : undefined}');
   });
 });
 

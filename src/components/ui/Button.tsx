@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, PropsWithChildren } from 'react';
+import type { ButtonHTMLAttributes, PropsWithChildren, Ref } from 'react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type ButtonSize = 'md' | 'sm';
@@ -8,6 +8,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
   fullWidth?: boolean;
   loading?: boolean;
+  /** Reaches the native button, e.g. to return focus after an inline editor closes. */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Button({

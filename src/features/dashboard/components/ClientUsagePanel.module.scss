@@ -436,3 +436,86 @@ $stack-below: 760px;
   line-height: 1.5;
   color: var(--text-quaternary);
 }
+
+/* ---------- Claude allowance ---------- */
+
+.blocked {
+  color: var(--amber-color);
+}
+
+// Unused keys collapse to their "not used yet" note on phones; keep the allowance visible.
+// Same specificity as the collapsing rule above, so this later declaration wins.
+.unused .metric.limitMetric {
+  @media (max-width: $stack-below) {
+    display: flex;
+  }
+}
+
+.limitMeter {
+  max-width: 160px;
+  margin-top: 2px;
+}
+
+.limit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.limitText {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+// Button's small size is sized for toolbars; keep these inside the text line.
+.limit .limitText .limitEdit,
+.limit .limitEditor .limitAction {
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.limit .limitText .limitEdit > span {
+  display: inline-flex;
+}
+
+.limitReached {
+  border-color: color-mix(in srgb, var(--viz-failure) 45%, transparent);
+  background: color-mix(in srgb, var(--viz-failure) 10%, transparent);
+  color: var(--viz-failure);
+}
+
+.limitEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.limitEditor .limitInput {
+  width: 84px;
+  padding: 4px 8px;
+  font-family: $font-mono;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.limitHint {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.limitHintInvalid {
+  color: var(--viz-failure);
+}

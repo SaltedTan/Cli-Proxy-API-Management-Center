@@ -58,6 +58,7 @@ export function DashboardPage() {
     refresh,
     refreshRoutingPanel,
     refreshClientUsage,
+    saveClientLimit,
   } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
@@ -431,6 +432,7 @@ export function DashboardPage() {
           usage={clientUsage}
           localNames={clientKeyNames}
           onRefresh={connected ? refreshClientUsage : undefined}
+          onSaveLimit={connected ? saveClientLimit : undefined}
         />
       </section>
 

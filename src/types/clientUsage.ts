@@ -22,6 +22,8 @@ export interface ClientUsageCounters {
   requests: number;
   /** Failed upstream attempts, including ones that were retried. */
   failed: number;
+  /** Refused by the key's Claude allowance before any upstream call; not in `requests`. */
+  blocked: number;
   tokens: ClientUsageTokens;
 }
 
@@ -58,6 +60,14 @@ export interface ClientKeyClaudeUsage {
   /** Claude Pro units used in each credential's open weekly window. */
   currentProUnits: number;
   totalProUnits: number;
+  /** `access.api-key-limits` allowance in Pro units per weekly window; null when unlimited. */
+  limitProUnits: number | null;
+  /** `max(limit - current, 0)`; null when unlimited. */
+  remainingProUnits: number | null;
+  /** The proxy is refusing this key's Claude requests until a window resets. */
+  limitReached: boolean;
+  /** Earliest window reset among the credentials this key is using; null when unknown. */
+  limitResetsAtMs: number | null;
   credentials: ClientKeyClaudeCredentialUsage[];
 }
 
@@ -98,4 +108,6 @@ export interface ClientUsageSnapshot {
   sinceMs: number | null;
   keys: ClientKeyUsage[];
   claudeCredentials: ClaudeCredentialUsage[];
+  /** Whether the backend enforces `access.api-key-limits`; false on older backends. */
+  claudeLimitsSupported: boolean;
 }
