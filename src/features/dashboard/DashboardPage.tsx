@@ -18,6 +18,7 @@ import { Meter } from './components/Meter';
 import { Sparkline } from './components/Sparkline';
 import { ThroughputChart } from './components/ThroughputChart';
 import { RoutingPanel } from './components/RoutingPanel';
+import { ClientUsagePanel } from './components/ClientUsagePanel';
 import { routingStrategyLabelKey } from './routing';
 import { useCountUp, useRevealGroup, useRevealOnScroll } from '@/hooks/motion';
 import { providerLabel, splitWindowMinutes, toneForSuccessRate, type MeterTone } from './utils';
@@ -52,8 +53,11 @@ export function DashboardPage() {
     credentials,
     authFiles,
     routing,
+    clientUsage,
+    clientKeyNames,
     refresh,
     refreshRoutingPanel,
+    refreshClientUsage,
   } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
@@ -63,6 +67,7 @@ export function DashboardPage() {
   const statsRef = useRevealGroup<HTMLElement>(0.12);
   const trafficRef = useRevealOnScroll<HTMLElement>();
   const fleetRef = useRevealOnScroll<HTMLElement>();
+  const clientUsageRef = useRevealOnScroll<HTMLElement>();
   const routingRef = useRevealOnScroll<HTMLElement>();
   const detailRef = useRevealGroup<HTMLElement>();
   const ctaRef = useRevealGroup<HTMLElement>();
@@ -413,6 +418,20 @@ export function DashboardPage() {
             </ul>
           )}
         </div>
+      </section>
+
+      {/* ---------- Usage by API key ---------- */}
+      <section className={styles.section} ref={clientUsageRef}>
+        <header className={styles.sectionHead}>
+          <span className={styles.eyebrow}>{t('dashboard.client_usage_eyebrow')}</span>
+          <h2 className={styles.sectionTitle}>{t('dashboard.client_usage_title')}</h2>
+          <p className={styles.sectionDescription}>{t('dashboard.client_usage_description')}</p>
+        </header>
+        <ClientUsagePanel
+          usage={clientUsage}
+          localNames={clientKeyNames}
+          onRefresh={connected ? refreshClientUsage : undefined}
+        />
       </section>
 
       {/* ---------- Routing ---------- */}

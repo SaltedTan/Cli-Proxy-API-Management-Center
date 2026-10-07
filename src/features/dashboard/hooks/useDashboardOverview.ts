@@ -4,6 +4,9 @@ import { useAuthStore, useConfigStore, useModelsStore } from '@/stores';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
 import { useRoutingObservability } from './useRoutingObservability';
+import { useClientUsage } from './useClientUsage';
+import { readApiKeyNames } from '@/features/config/apiKeyNames';
+import { buildLocalKeyNames } from '../clientUsage';
 import {
   mergeRecentRequestBucketGroups,
   normalizeRecentRequestUsageEntry,
@@ -129,6 +132,7 @@ export function useDashboardOverview() {
   });
 
   const { routing, refreshRouting } = useRoutingObservability(connected, apiBase);
+  const { clientUsage, refreshClientUsage } = useClientUsage(connected, apiBase);
 
   const [authFiles, setAuthFiles] = useState<AuthFileItem[] | null>(null);
 
@@ -167,14 +171,30 @@ export function useDashboardOverview() {
       loadModels(),
       refreshRecentRequests(),
       refreshRouting(),
+      refreshClientUsage(),
     ]);
-  }, [connected, fetchConfig, loadAuthFiles, loadModels, refreshRecentRequests, refreshRouting]);
+  }, [
+    connected,
+    fetchConfig,
+    loadAuthFiles,
+    loadModels,
+    refreshRecentRequests,
+    refreshRouting,
+    refreshClientUsage,
+  ]);
 
   /** Scoped to the routing panel: its pool card is derived from auth-file cooldowns. */
   const refreshRoutingPanel = useCallback(async () => {
     if (!connected) return;
     await Promise.allSettled([refreshRouting(), loadAuthFiles()]);
   }, [connected, refreshRouting, loadAuthFiles]);
+
+  /** Names saved in this browser by the API keys editor, by backend key id. */
+  const configuredApiKeys = config?.apiKeys;
+  const clientKeyNames = useMemo(
+    () => buildLocalKeyNames(apiBase, configuredApiKeys ?? [], readApiKeyNames(apiBase)),
+    [apiBase, configuredApiKeys]
+  );
 
   const providerKeyCounts = useMemo(() => (config ? getProviderKeyCounts(config) : null), [config]);
 
@@ -303,7 +323,10 @@ export function useDashboardOverview() {
     credentials,
     authFiles,
     routing,
+    clientUsage,
+    clientKeyNames,
     refresh,
     refreshRoutingPanel,
+    refreshClientUsage,
   };
 }
