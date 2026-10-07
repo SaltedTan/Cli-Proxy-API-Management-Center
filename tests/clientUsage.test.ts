@@ -781,6 +781,8 @@ describe('client usage logic', () => {
     // a request to clear the limit.
     expect(parseClaudeLimitInput('', true)).toBeUndefined();
     expect(parseClaudeLimitInput('1.5', true)).toBeUndefined();
+    // Huge but finite values stay finite instead of overflowing while rounding.
+    expect(parseClaudeLimitInput('1e308')).toBe(1e308);
     expect(formatClaudeLimitInput(null)).toBe('');
     expect(formatClaudeLimitInput(0)).toBe('');
     expect(formatClaudeLimitInput(1.5)).toBe('1.5');

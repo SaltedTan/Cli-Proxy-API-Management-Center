@@ -16,11 +16,16 @@ export type ClientUsageLimits = Record<string, number>;
 const toLimit = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 
-/** Rounds to two decimals; null for anything that does not set a limit (blank, 0, NaN, negative). */
+/**
+ * Rounds to two decimals; null for anything that does not set a limit (blank, 0, NaN,
+ * negative). Always finite and idempotent: a value too large to round stays as it is,
+ * so normalizing twice can never turn a limit into "clear".
+ */
 export const normalizeClientUsageLimit = (value: number | null | undefined): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const rounded = Math.round(value * 100) / 100;
-  return rounded > 0 ? rounded : null;
+  const limit = Number.isFinite(rounded) ? rounded : value;
+  return limit > 0 ? limit : null;
 };
 
 /** The map as stored, with every entry as the backend returned it. */
@@ -87,6 +92,10 @@ export const clientUsageLimitsApi = {
   async set(keyId: string, value: number | null): Promise<void> {
     const id = keyId.trim();
     if (!id) throw new RangeError('Client key id is required');
+    // Only null (or a value that rounds to 0) clears; a non-finite number is a bug.
+    if (value !== null && !Number.isFinite(value)) {
+      throw new RangeError('Client key allowance must be a finite number');
+    }
     // Bound to the connection the save was requested on, even while it waits its turn.
     const assertConnection = guardConfigConnection();
     const write = lastWrite.then(() => writeLimit(id, value, assertConnection));

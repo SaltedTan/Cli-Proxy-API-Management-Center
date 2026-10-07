@@ -235,4 +235,25 @@ describe('client usage limits: write', () => {
     // Only the first save had to read; the queued one was aborted before reading.
     expect(reads).toBe(1);
   });
+
+  test('a huge value never clears an existing allowance', async () => {
+    // Rounding 1e308 to two decimals overflows to Infinity; normalizing must stay
+    // finite and idempotent so a second pass cannot turn the value into "clear".
+    expect(normalizeClientUsageLimit(1e308)).toBe(1e308);
+    expect(normalizeClientUsageLimit(normalizeClientUsageLimit(1e308))).toBe(1e308);
+    expect(normalizeClientUsageLimit(Number.MAX_VALUE)).toBe(Number.MAX_VALUE);
+    const get = mock('get', { [LAPTOP_ID]: 1.5 });
+    const put = mock('put');
+    const remove = mock('delete');
+    await clientUsageLimitsApi.set(LAPTOP_ID, 1e308);
+    expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_ID]: 1e308 });
+    expect(remove).not.toHaveBeenCalled();
+    // Non-finite values are refused outright rather than read as "clear".
+    for (const value of [Infinity, -Infinity, NaN]) {
+      await expect(clientUsageLimitsApi.set(LAPTOP_ID, value)).rejects.toBeInstanceOf(RangeError);
+    }
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+  });
 });
