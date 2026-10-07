@@ -129,6 +129,15 @@ export interface ClaudeWindowStatus {
   resetsAtMs: number;
 }
 
+/**
+ * Identity of an open window for UI state that must not outlive it, such as a pending
+ * reset confirmation: a poll can end the window (reset elsewhere, or expired) and a later
+ * request can open another one, which is a different window to confirm.
+ */
+export function claudeWindowIdentity(period: ClaudeWindowStatus | null): number | null {
+  return period ? period.resetsAtMs : null;
+}
+
 /** Null while the key has no open window (never used Claude, idle past its last window, or reset). */
 export function claudeWindowStatus(
   claude: ClientKeyClaudeUsage | null,

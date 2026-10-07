@@ -23,6 +23,7 @@ import type { ClientUsageState } from '../hooks/useClientUsage';
 import {
   buildClientUsageRows,
   claudeLimitTone,
+  claudeWindowIdentity,
   claudePlanLabel,
   clientUsageHints,
   clientUsageToday,
@@ -548,14 +549,18 @@ function ClaudeLimitCell({
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  // The window a pending confirmation was asked about; null while none is pending.
+  const [confirmingWindow, setConfirmingWindow] = useState<number | null>(null);
   const [resetting, setResetting] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const resetTriggerRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef(false);
   const restoreResetFocusRef = useRef(false);
   const hintId = useId();
+  const windowIdentity = claudeWindowIdentity(period);
+  const confirming = confirmingWindow !== null && confirmingWindow === windowIdentity;
 
   useEffect(() => {
     if (editing || !restoreFocusRef.current) return;
@@ -563,17 +568,36 @@ function ClaudeLimitCell({
     triggerRef.current?.focus();
   }, [editing]);
 
+  // A confirmation is dropped once the window it was asked about ends or changes
+  // (a poll removed it, a later request opened another), never carried over.
   useEffect(() => {
-    if (confirming || !restoreResetFocusRef.current) return;
+    if (confirmingWindow === null || confirmingWindow === windowIdentity) return;
+    restoreResetFocusRef.current = true;
+    setConfirmingWindow(null);
+  }, [confirmingWindow, windowIdentity]);
+
+  // Opening moves focus into the confirmation (the trigger it replaces is gone), on the
+  // safe choice; closing returns it to the trigger, or to the allowance editor's button
+  // when the window is gone and the trigger with it.
+  useEffect(() => {
+    if (confirming) {
+      keepRef.current?.focus();
+      return;
+    }
+    if (!restoreResetFocusRef.current) return;
     restoreResetFocusRef.current = false;
-    resetTriggerRef.current?.focus();
+    (resetTriggerRef.current ?? triggerRef.current)?.focus();
   }, [confirming]);
 
   if (!status && !onSave && !period) return null;
 
+  const openConfirm = () => setConfirmingWindow(windowIdentity);
+
   const closeConfirm = () => {
-    restoreResetFocusRef.current = true;
-    setConfirming(false);
+    setConfirmingWindow((pending) => {
+      if (pending !== null) restoreResetFocusRef.current = true;
+      return null;
+    });
   };
 
   const handleReset = async () => {
@@ -725,35 +749,15 @@ function ClaudeLimitCell({
             )}
             {onResetWindow &&
               (confirming ? (
-                <span
-                  className={styles.windowConfirm}
-                  role="group"
-                  aria-label={t('dashboard.client_usage_window_reset_confirm', { name })}
+                <WindowResetConfirm
+                  name={name}
+                  t={t}
+                  resetting={resetting}
+                  keepRef={keepRef}
+                  onConfirm={() => void handleReset()}
+                  onCancel={closeConfirm}
                   onKeyDown={handleConfirmKeyDown}
-                >
-                  <span>{t('dashboard.client_usage_window_reset_confirm', { name })}</span>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    className={styles.limitAction}
-                    onClick={() => void handleReset()}
-                    loading={resetting}
-                    aria-label={t('dashboard.client_usage_window_reset_yes_label', { name })}
-                  >
-                    {t('dashboard.client_usage_window_reset_yes')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className={styles.limitAction}
-                    onClick={closeConfirm}
-                    disabled={resetting}
-                  >
-                    {t('dashboard.client_usage_window_reset_no')}
-                  </Button>
-                </span>
+                />
               ) : (
                 <Button
                   ref={resetTriggerRef}
@@ -761,7 +765,7 @@ function ClaudeLimitCell({
                   variant="ghost"
                   size="sm"
                   className={styles.windowReset}
-                  onClick={() => setConfirming(true)}
+                  onClick={openConfirm}
                   aria-label={t('dashboard.client_usage_window_reset_label', { name })}
                   title={t('dashboard.client_usage_window_reset_hint')}
                 >
@@ -772,6 +776,61 @@ function ClaudeLimitCell({
         )}
       </dd>
     </>
+  );
+}
+
+/**
+ * The inline confirmation of a window reset. Keep is the safe choice and receives focus
+ * through `keepRef` when the confirmation opens; Escape is handled on the whole group.
+ */
+export function WindowResetConfirm({
+  name,
+  t,
+  resetting,
+  keepRef,
+  onConfirm,
+  onCancel,
+  onKeyDown,
+}: {
+  name: string;
+  t: TFunction;
+  resetting: boolean;
+  keepRef: RefObject<HTMLButtonElement | null>;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}) {
+  return (
+    <span
+      className={styles.windowConfirm}
+      role="group"
+      aria-label={t('dashboard.client_usage_window_reset_confirm', { name })}
+      onKeyDown={onKeyDown}
+    >
+      <span>{t('dashboard.client_usage_window_reset_confirm', { name })}</span>
+      <Button
+        type="button"
+        variant="danger"
+        size="sm"
+        className={styles.limitAction}
+        onClick={onConfirm}
+        loading={resetting}
+        aria-label={t('dashboard.client_usage_window_reset_yes_label', { name })}
+      >
+        {t('dashboard.client_usage_window_reset_yes')}
+      </Button>
+      <Button
+        ref={keepRef}
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={styles.limitAction}
+        onClick={onCancel}
+        disabled={resetting}
+      >
+        {t('dashboard.client_usage_window_reset_no')}
+      </Button>
+    </span>
   );
 }
 
