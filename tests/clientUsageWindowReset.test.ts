@@ -5,7 +5,14 @@ import { I18nextProvider } from 'react-i18next';
 import { createInstance } from 'i18next';
 import en from '@/i18n/locales/en.json';
 import { WindowResetConfirm } from '@/features/dashboard/components/ClientUsagePanel';
-import { claudeWindowIdentity } from '@/features/dashboard/clientUsage';
+import {
+  claudeWindowIdentity,
+  initialWindowResetConfirm,
+  windowResetConfirmReducer as reduce,
+  windowResetConfirming,
+  type WindowResetConfirmEvent,
+  type WindowResetConfirmState,
+} from '@/features/dashboard/clientUsage';
 
 const i18n = createInstance();
 await i18n.init({ lng: 'en', fallbackLng: 'en', resources: { en: { translation: en } } });
@@ -49,7 +56,10 @@ describe('client usage window reset confirmation', () => {
     );
     expect(markup).toContain(t('dashboard.client_usage_window_reset_no'));
     expect(markup).not.toContain('disabled=""');
-    const { group, buttons: [reset, keep] } = buttons();
+    const {
+      group,
+      buttons: [reset, keep],
+    } = buttons();
     // Escape is handled on the whole group, so it works from either button.
     expect(typeof group.props.onKeyDown).toBe('function');
     // Opening the confirmation replaces the trigger, so focus must land inside it: on
@@ -73,5 +83,105 @@ describe('client usage window reset confirmation', () => {
     expect(claudeWindowIdentity({ startedAtMs: 1, resetsAtMs: 3 })).not.toBe(
       claudeWindowIdentity({ startedAtMs: 1, resetsAtMs: 2 })
     );
+  });
+});
+
+/** Applies events in order, as the component dispatches them. */
+const after = (...events: WindowResetConfirmEvent[]): WindowResetConfirmState =>
+  events.reduce(reduce, initialWindowResetConfirm);
+
+describe('client usage window reset confirmation state', () => {
+  const WINDOW = 2_000;
+  const NEXT_WINDOW = 3_000;
+
+  test('opens for the window it was asked about and closes on Keep or Escape', () => {
+    const open = after({ type: 'open', window: WINDOW });
+    expect(open).toEqual({ window: WINDOW, resetting: false, restoreFocus: false });
+    expect(windowResetConfirming(open, WINDOW)).toBe(true);
+    // Keep and Escape both cancel; focus then goes back to the trigger, once.
+    const cancelled = reduce(open, { type: 'cancel' });
+    expect(cancelled).toEqual({ window: null, resetting: false, restoreFocus: true });
+    expect(windowResetConfirming(cancelled, WINDOW)).toBe(false);
+    expect(reduce(cancelled, { type: 'focus-restored' })).toEqual(initialWindowResetConfirm);
+    // Nothing to cancel or restore while closed.
+    expect(reduce(initialWindowResetConfirm, { type: 'cancel' })).toBe(initialWindowResetConfirm);
+    expect(reduce(initialWindowResetConfirm, { type: 'focus-restored' })).toBe(
+      initialWindowResetConfirm
+    );
+  });
+
+  test('a reset in flight cannot be cancelled or started again', () => {
+    const resetting = after({ type: 'open', window: WINDOW }, { type: 'reset' });
+    expect(resetting).toEqual({ window: WINDOW, resetting: true, restoreFocus: false });
+    expect(reduce(resetting, { type: 'cancel' })).toBe(resetting);
+    expect(reduce(resetting, { type: 'reset' })).toBe(resetting);
+    // Without an open confirmation there is nothing to reset.
+    expect(reduce(initialWindowResetConfirm, { type: 'reset' })).toBe(initialWindowResetConfirm);
+  });
+
+  test('a reset that succeeds closes the confirmation; one that fails keeps it to retry', () => {
+    const succeeded = after(
+      { type: 'open', window: WINDOW },
+      { type: 'reset' },
+      { type: 'reset-succeeded' }
+    );
+    expect(succeeded).toEqual({ window: null, resetting: false, restoreFocus: true });
+    const failed = after(
+      { type: 'open', window: WINDOW },
+      { type: 'reset' },
+      { type: 'reset-failed' }
+    );
+    expect(failed).toEqual({ window: WINDOW, resetting: false, restoreFocus: false });
+    expect(windowResetConfirming(failed, WINDOW)).toBe(true);
+    expect(reduce(failed, { type: 'reset' })).toEqual({
+      window: WINDOW,
+      resetting: true,
+      restoreFocus: false,
+    });
+    expect(reduce(failed, { type: 'cancel' }).window).toBe(null);
+  });
+
+  test('a confirmation never outlives its window', () => {
+    const open = after({ type: 'open', window: WINDOW });
+    // The same window seen again by a poll keeps it.
+    expect(reduce(open, { type: 'window', window: WINDOW })).toBe(open);
+    // A poll that ends the window, or a request that opens another, drops it and
+    // returns focus; before the drop is applied the stale confirmation does not show.
+    expect(windowResetConfirming(open, NEXT_WINDOW)).toBe(false);
+    expect(windowResetConfirming(open, null)).toBe(false);
+    for (const window of [null, NEXT_WINDOW]) {
+      expect(reduce(open, { type: 'window', window })).toEqual({
+        window: null,
+        resetting: false,
+        restoreFocus: true,
+      });
+    }
+    expect(reduce(initialWindowResetConfirm, { type: 'window', window: NEXT_WINDOW })).toBe(
+      initialWindowResetConfirm
+    );
+    // Dropped while the reset is in flight: its outcome keeps the focus to restore and
+    // does not reopen anything.
+    const dropped = after(
+      { type: 'open', window: WINDOW },
+      { type: 'reset' },
+      { type: 'window', window: null }
+    );
+    expect(dropped).toEqual({ window: null, resetting: true, restoreFocus: true });
+    expect(reduce(dropped, { type: 'reset-succeeded' })).toEqual({
+      window: null,
+      resetting: false,
+      restoreFocus: true,
+    });
+    expect(reduce(dropped, { type: 'reset-failed' })).toEqual({
+      window: null,
+      resetting: false,
+      restoreFocus: true,
+    });
+    // The trigger of the window now shown opens a confirmation for that window.
+    expect(reduce(open, { type: 'open', window: NEXT_WINDOW })).toEqual({
+      window: NEXT_WINDOW,
+      resetting: false,
+      restoreFocus: false,
+    });
   });
 });

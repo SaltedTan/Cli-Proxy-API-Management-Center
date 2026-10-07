@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -32,8 +33,11 @@ import {
   formatLimitMeterValues,
   formatPlanAllowance,
   formatProUnits,
+  initialWindowResetConfirm,
   parseClaudeLimitInput,
   weeklyUtilizationTone,
+  windowResetConfirming,
+  windowResetConfirmReducer,
   type ClientUsageHint,
   type ClientUsageRow,
 } from '../clientUsage';
@@ -550,18 +554,16 @@ function ClaudeLimitCell({
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
-  // The window a pending confirmation was asked about; null while none is pending.
-  const [confirmingWindow, setConfirmingWindow] = useState<number | null>(null);
-  const [resetting, setResetting] = useState(false);
+  const [reset, dispatchReset] = useReducer(windowResetConfirmReducer, initialWindowResetConfirm);
+  const resetting = reset.resetting;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const resetTriggerRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef(false);
-  const restoreResetFocusRef = useRef(false);
   const hintId = useId();
   const windowIdentity = claudeWindowIdentity(period);
-  const confirming = confirmingWindow !== null && confirmingWindow === windowIdentity;
+  const confirming = windowResetConfirming(reset, windowIdentity);
 
   useEffect(() => {
     if (editing || !restoreFocusRef.current) return;
@@ -572,10 +574,8 @@ function ClaudeLimitCell({
   // A confirmation is dropped once the window it was asked about ends or changes
   // (a poll removed it, a later request opened another), never carried over.
   useEffect(() => {
-    if (confirmingWindow === null || confirmingWindow === windowIdentity) return;
-    restoreResetFocusRef.current = true;
-    setConfirmingWindow(null);
-  }, [confirmingWindow, windowIdentity]);
+    dispatchReset({ type: 'window', window: windowIdentity });
+  }, [windowIdentity]);
 
   // Opening moves focus into the confirmation (the trigger it replaces is gone), on the
   // safe choice; closing returns it to the trigger, or to the allowance editor's button
@@ -585,40 +585,34 @@ function ClaudeLimitCell({
       keepRef.current?.focus();
       return;
     }
-    if (!restoreResetFocusRef.current) return;
-    restoreResetFocusRef.current = false;
+    if (!reset.restoreFocus) return;
+    dispatchReset({ type: 'focus-restored' });
     (resetTriggerRef.current ?? triggerRef.current)?.focus();
-  }, [confirming]);
+  }, [confirming, reset.restoreFocus]);
 
   if (!status && !onSave && !period) return null;
 
-  const openConfirm = () => setConfirmingWindow(windowIdentity);
-
-  const closeConfirm = () => {
-    setConfirmingWindow((pending) => {
-      if (pending !== null) restoreResetFocusRef.current = true;
-      return null;
-    });
+  const openConfirm = () => {
+    if (windowIdentity !== null) dispatchReset({ type: 'open', window: windowIdentity });
   };
 
   const handleReset = async () => {
     if (!onResetWindow || resetting) return;
-    setResetting(true);
+    dispatchReset({ type: 'reset' });
     try {
       await onResetWindow(row.id);
-      closeConfirm();
+      dispatchReset({ type: 'reset-succeeded' });
     } catch {
       // Stay open so the reset can be retried.
       showNotification(t('dashboard.client_usage_window_reset_error'), 'error');
-    } finally {
-      setResetting(false);
+      dispatchReset({ type: 'reset-failed' });
     }
   };
 
   const handleConfirmKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape' && !resetting) {
       event.preventDefault();
-      closeConfirm();
+      dispatchReset({ type: 'cancel' });
     }
   };
 
@@ -753,7 +747,7 @@ function ClaudeLimitCell({
                   resetting={resetting}
                   keepRef={keepRef}
                   onConfirm={() => void handleReset()}
-                  onCancel={closeConfirm}
+                  onCancel={() => dispatchReset({ type: 'cancel' })}
                   onKeyDown={handleConfirmKeyDown}
                 />
               ) : (

@@ -138,6 +138,76 @@ export function claudeWindowIdentity(period: ClaudeWindowStatus | null): number 
   return period ? period.resetsAtMs : null;
 }
 
+/** A key's inline window reset confirmation. */
+export interface WindowResetConfirmState {
+  /** The window the pending confirmation was asked about; null while none is pending. */
+  window: number | null;
+  /** The reset request is in flight. */
+  resetting: boolean;
+  /** Focus goes back to the reset trigger, or the editor's button, once it can. */
+  restoreFocus: boolean;
+}
+
+export type WindowResetConfirmEvent =
+  /** The reset trigger of the window shown was clicked. */
+  | { type: 'open'; window: number }
+  /** Keep or Escape. */
+  | { type: 'cancel' }
+  | { type: 'reset' }
+  | { type: 'reset-succeeded' }
+  | { type: 'reset-failed' }
+  /** The row now shows this window, or none. */
+  | { type: 'window'; window: number | null }
+  | { type: 'focus-restored' };
+
+export const initialWindowResetConfirm: WindowResetConfirmState = {
+  window: null,
+  resetting: false,
+  restoreFocus: false,
+};
+
+/**
+ * The confirmation's transitions. A reset in flight can be neither cancelled nor started
+ * again; one that fails keeps the confirmation open to retry. A confirmation never
+ * outlives the window it was asked about. Closing it, however, asks for focus back.
+ */
+export function windowResetConfirmReducer(
+  state: WindowResetConfirmState,
+  event: WindowResetConfirmEvent
+): WindowResetConfirmState {
+  switch (event.type) {
+    case 'open':
+      return { ...state, window: event.window, restoreFocus: false };
+    case 'cancel':
+      if (state.window === null || state.resetting) return state;
+      return { ...state, window: null, restoreFocus: true };
+    case 'reset':
+      if (state.window === null || state.resetting) return state;
+      return { ...state, resetting: true };
+    case 'reset-succeeded':
+      return {
+        window: null,
+        resetting: false,
+        restoreFocus: state.restoreFocus || state.window !== null,
+      };
+    case 'reset-failed':
+      return { ...state, resetting: false };
+    case 'window':
+      if (state.window === null || state.window === event.window) return state;
+      return { ...state, window: null, restoreFocus: true };
+    case 'focus-restored':
+      return state.restoreFocus ? { ...state, restoreFocus: false } : state;
+  }
+}
+
+/** Whether the confirmation shows for the window the row shows now. */
+export function windowResetConfirming(
+  state: WindowResetConfirmState,
+  window: number | null
+): boolean {
+  return state.window !== null && state.window === window;
+}
+
 /** Null while the key has no open window (never used Claude, idle past its last window, or reset). */
 export function claudeWindowStatus(
   claude: ClientKeyClaudeUsage | null,
