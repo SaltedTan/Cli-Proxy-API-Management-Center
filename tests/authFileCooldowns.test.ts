@@ -32,6 +32,15 @@ const render = (
   options: { resetting?: boolean; resetDisabled?: boolean; onReset?: () => void } = {}
 ) => renderToStaticMarkup(createElement(AuthFileCooldownSection, { snapshot: value, ...options }));
 
+/** React escapes text and attributes; other test files may switch the shared language. */
+const html = (text: string) =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+
 function response(files: Record<string, unknown>[]): AuthFilesResponse {
   return { observed_at: observedAt, files } as unknown as AuthFilesResponse;
 }
@@ -224,8 +233,8 @@ describe('cooldown section rendering', () => {
     expect(render(snapshot)).not.toContain(i18n.t('auth_files.cooldown_reset_button'));
 
     const available = render(snapshot, { onReset: () => {} });
-    expect(available).toContain(i18n.t('auth_files.cooldown_reset_button'));
-    expect(available).toContain(i18n.t('auth_files.cooldown_reset_hint'));
+    expect(available).toContain(html(i18n.t('auth_files.cooldown_reset_button')));
+    expect(available).toContain(html(i18n.t('auth_files.cooldown_reset_hint')));
     expect(available).not.toContain('disabled=""');
 
     const pending = render(snapshot, { onReset: () => {}, resetting: true });
