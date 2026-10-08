@@ -1225,6 +1225,30 @@ describe('client usage panel rendering', () => {
     );
     expect(resetsIn(readOnly)).toBe(resetsIn(markup));
     expect(markup).not.toContain('dashboard.client_usage_');
+
+    // Without an allowance the window can still be reset, but its end is not shown.
+    const unlimited = {
+      ...snapshot,
+      keys: snapshot.keys.map((entry) =>
+        entry.id === LAPTOP_ID && entry.claude
+          ? { ...entry, claude: claude({ ...entry.claude, limitProUnits: null }) }
+          : entry
+      ),
+    };
+    const unlimitedMarkup = renderPanel(
+      { status: 'ready', data: unlimited },
+      onRefresh,
+      saveLimit,
+      resetWindow
+    );
+    expect(unlimitedMarkup).toContain(
+      `aria-label="${html(t('dashboard.client_usage_window_reset_label', { name: 'MacBook' }))}"`
+    );
+    expect(resetsIn(unlimitedMarkup)).toBe(resetsIn(markup) - 1);
+    // Read-only, an unlimited key's cell has nothing left to show.
+    const unlimitedReadOnly = renderPanel({ status: 'ready', data: unlimited }, onRefresh);
+    expect(resetsIn(unlimitedReadOnly)).toBe(resetsIn(unlimitedMarkup));
+    expect(unlimitedReadOnly).not.toContain(t('dashboard.client_usage_limit_none'));
   });
 
   test('offers to remove keys that are no longer in config', () => {

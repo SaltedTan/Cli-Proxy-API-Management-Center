@@ -563,7 +563,8 @@ export function ClaudeLimitEditorForm({
  */
 /**
  * The allowance meter and editor, plus the key's open 7-day window with its reset
- * control. The reset asks for confirmation inline, like the editor, and keeps the row
+ * control. The reset time shows only for keys with an allowance, which the window's end
+ * restores. The reset asks for confirmation inline, like the editor, and keeps the row
  * in place while the backend ends the window.
  */
 function ClaudeLimitCell({
@@ -625,7 +626,12 @@ function ClaudeLimitCell({
     (resetTriggerRef.current ?? triggerRef.current)?.focus();
   }, [confirming, reset.restoreFocus]);
 
-  if (!status && !onSave && !period) return null;
+  // Without an allowance the window's end changes nothing the key is held to; with a
+  // reached one, its badge already says when the window resets.
+  const showResetTime = status !== null && !status.reached;
+  const showWindowLine = period !== null && (showResetTime || onResetWindow !== undefined);
+
+  if (!status && !onSave && !showWindowLine) return null;
 
   const openConfirm = () => {
     if (windowIdentity !== null) dispatchReset({ type: 'open', window: windowIdentity });
@@ -761,10 +767,9 @@ function ClaudeLimitCell({
             )}
           </span>
         )}
-        {period && (
+        {period && showWindowLine && (
           <span className={styles.windowLine}>
-            {/* The reached badge above already says when the window resets. */}
-            {!status?.reached && (
+            {showResetTime && (
               <time
                 dateTime={new Date(period.resetsAtMs).toISOString()}
                 title={new Date(period.resetsAtMs).toLocaleString(locale)}
