@@ -123,6 +123,43 @@ describe('client usage limits: write', () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  test('clear removes every entry for the id and writes nothing when there is none', async () => {
+    const get = mock('get', { [LAPTOP_KEY]: 1, [LAPTOP_ID]: 2, [PHONE_ID]: 0.25 });
+    const put = mock('put');
+    const remove = mock('delete');
+    await clientUsageLimitsApi.clear(` ${LAPTOP_ID} `);
+    expect(put).toHaveBeenCalledWith(PATH, { [PHONE_ID]: 0.25 });
+    get.mockResolvedValue({ [PHONE_ID]: 0.25 });
+    await clientUsageLimitsApi.clear(PHONE_ID);
+    expect(remove).toHaveBeenCalledWith(PATH);
+    // Nothing configured for the key, or no map at all: the config is left untouched.
+    get.mockResolvedValue({ [PHONE_ID]: 0.25 });
+    await clientUsageLimitsApi.clear(LAPTOP_ID);
+    get.mockRejectedValue(NOT_FOUND);
+    await clientUsageLimitsApi.clear(LAPTOP_ID);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    await expect(clientUsageLimitsApi.clear('  ')).rejects.toBeInstanceOf(RangeError);
+  });
+
+  test('clear runs after a save still in flight, so the save cannot bring the allowance back', async () => {
+    let stored: Record<string, number> = { [PHONE_ID]: 0.25 };
+    const get = mock('get');
+    get.mockImplementation(async () => ({ ...stored }));
+    const put = mock('put');
+    put.mockImplementation(async (_path: string, map: Record<string, number>) => {
+      stored = map;
+    });
+    const remove = mock('delete');
+    remove.mockImplementation(async () => {
+      stored = {};
+    });
+    const save = clientUsageLimitsApi.set(LAPTOP_ID, 1.5);
+    await clientUsageLimitsApi.clear(LAPTOP_ID);
+    await save;
+    expect(stored).toEqual({ [PHONE_ID]: 0.25 });
+  });
+
   test('requires a key id', async () => {
     const get = mock('get');
     const put = mock('put');

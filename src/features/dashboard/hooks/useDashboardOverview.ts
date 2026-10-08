@@ -206,6 +206,22 @@ export function useDashboardOverview() {
     [refreshClientUsage]
   );
 
+  /**
+   * Removes a key that left the config from the usage panel (see `clientUsageApi.removeKey`).
+   * The panel and, when the allowance may have been written, the config cache are reloaded
+   * even when a step fails, since the first may have succeeded.
+   */
+  const removeClientKey = useCallback(
+    async (keyId: string, clearLimit: boolean) => {
+      try {
+        await clientUsageApi.removeKey(keyId, clearLimit);
+      } finally {
+        await Promise.allSettled([refreshClientUsage(), clearLimit ? fetchConfig(true) : null]);
+      }
+    },
+    [refreshClientUsage, fetchConfig]
+  );
+
   /** Scoped to the routing panel: its pool card is derived from auth-file cooldowns. */
   const refreshRoutingPanel = useCallback(async () => {
     if (!connected) return;
@@ -353,5 +369,6 @@ export function useDashboardOverview() {
     refreshClientUsage,
     saveClientLimit,
     resetClientWindow,
+    removeClientKey,
   };
 }

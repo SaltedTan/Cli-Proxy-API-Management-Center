@@ -55,6 +55,12 @@ const clock = createSharedClock({ intervalMs: 30_000 });
 export type SaveClientLimit = (keyId: string, value: number | null) => Promise<void>;
 /** Ends a key's current 7-day Claude window on the backend; its history is kept. */
 export type ResetClientWindow = (keyId: string) => Promise<void>;
+/**
+ * Deletes a key's usage history and, with `clearLimit`, its Claude allowance if one is
+ * configured.
+ */
+export type RemoveClientKey = (keyId: string, clearLimit: boolean) => Promise<void>;
+type RemoveRow = (keyId: string) => Promise<void>;
 
 export interface ClientUsagePanelProps {
   usage: ClientUsageState;
@@ -66,6 +72,8 @@ export interface ClientUsagePanelProps {
   onSaveLimit?: SaveClientLimit;
   /** Omitted hides the window reset; it is offered only on rows with an open window. */
   onResetWindow?: ResetClientWindow;
+  /** Omitted hides the remove control; it is offered only on keys no longer in config. */
+  onRemoveKey?: RemoveClientKey;
   /** Injected by tests; the live panel follows the shared clock. */
   nowMs?: number;
 }
@@ -76,6 +84,7 @@ export function ClientUsagePanel({
   onRefresh,
   onSaveLimit,
   onResetWindow,
+  onRemoveKey,
   nowMs,
 }: ClientUsagePanelProps) {
   const { t, i18n } = useTranslation();
@@ -83,6 +92,18 @@ export function ClientUsagePanel({
   const now = nowMs ?? tickMs;
   const locale = i18n.language;
   const [refreshing, setRefreshing] = useState(false);
+  const [removals, setRemovals] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
+
+  // A removed row takes the focus with it. Once the list has re-rendered, keep the focus
+  // in it, or on Refresh when no row is left, unless something else has taken it since.
+  useEffect(() => {
+    if (removals === 0) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    (listRef.current ?? refreshRef.current)?.focus();
+  }, [removals]);
 
   const handleRefresh = async () => {
     if (!onRefresh || refreshing) return;
@@ -113,6 +134,15 @@ export function ClientUsagePanel({
   const anyUsage = rows.some((row) => row.used);
   // Older backends report usage but do not enforce limits; do not offer to edit them.
   const saveLimit = data?.claudeLimitsSupported ? onSaveLimit : undefined;
+  // Where allowances exist, a removal clears the key's allowance as configured, not as
+  // last reported: a save still in flight may have set one since.
+  const clearLimit = data?.claudeLimitsSupported ?? false;
+  const removeKey: RemoveRow | undefined =
+    onRemoveKey &&
+    (async (keyId) => {
+      await onRemoveKey(keyId, clearLimit);
+      setRemovals((count) => count + 1);
+    });
 
   const formatDate = (ms: number) =>
     new Date(ms).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -136,6 +166,7 @@ export function ClientUsagePanel({
           )}
           {onRefresh && (
             <Button
+              ref={refreshRef}
               variant="secondary"
               size="sm"
               className={styles.refresh}
@@ -185,7 +216,12 @@ export function ClientUsagePanel({
               <span>{t('dashboard.client_usage_col_last_used')}</span>
             </div>
           </div>
-          <ul className={styles.rows} aria-label={t('dashboard.client_usage_list_label')}>
+          <ul
+            ref={listRef}
+            className={styles.rows}
+            aria-label={t('dashboard.client_usage_list_label')}
+            tabIndex={-1}
+          >
             {rows.map((row) => (
               <UsageRow
                 key={row.id}
@@ -195,6 +231,7 @@ export function ClientUsagePanel({
                 now={now}
                 onSaveLimit={saveLimit}
                 onResetWindow={onResetWindow}
+                onRemove={removeKey}
               />
             ))}
           </ul>
@@ -259,6 +296,7 @@ function UsageRow({
   now,
   onSaveLimit,
   onResetWindow,
+  onRemove,
 }: {
   row: ClientUsageRow;
   t: TFunction;
@@ -266,7 +304,9 @@ function UsageRow({
   now: number;
   onSaveLimit?: SaveClientLimit;
   onResetWindow?: ResetClientWindow;
+  onRemove?: RemoveRow;
 }) {
+  const notInConfig = !row.configured && !row.anonymous;
   const units = (value: number) =>
     t('dashboard.client_usage_pro_units', { value: formatProUnits(value, locale) });
   const share = row.claudeShare === null ? null : formatPercent(row.claudeShare * 100, 0);
@@ -291,12 +331,13 @@ function UsageRow({
           <span className={styles.name} title={row.label.text}>
             {row.label.text}
           </span>
-          {(row.secondary || (!row.configured && !row.anonymous)) && (
+          {(row.secondary || notInConfig) && (
             <span className={styles.identityMeta}>
               {row.secondary && <span className={styles.mono}>{row.secondary}</span>}
-              {!row.configured && !row.anonymous && (
+              {notInConfig && (
                 <span className={styles.badge}>{t('dashboard.client_usage_not_in_config')}</span>
               )}
+              {notInConfig && onRemove && <RemoveKeyControl row={row} t={t} onRemove={onRemove} />}
             </span>
           )}
         </div>
@@ -507,15 +548,9 @@ export function ClaudeLimitEditorForm({
       </Button>
       <span
         id={hintId}
-        className={
-          invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint
-        }
+        className={invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint}
       >
-        {t(
-          invalid
-            ? 'dashboard.client_usage_limit_invalid'
-            : 'dashboard.client_usage_limit_hint'
-        )}
+        {t(invalid ? 'dashboard.client_usage_limit_invalid' : 'dashboard.client_usage_limit_hint')}
       </span>
     </form>
   );
@@ -821,6 +856,155 @@ export function WindowResetConfirm({
         disabled={resetting}
       >
         {t('dashboard.client_usage_window_reset_no')}
+      </Button>
+    </span>
+  );
+}
+
+/**
+ * Removes a key that is no longer in config from the list: its allowance, when it has one,
+ * and its usage history. The confirmation replaces the trigger inline, like the window
+ * reset, and stays open to retry when the removal fails.
+ */
+function RemoveKeyControl({
+  row,
+  t,
+  onRemove,
+}: {
+  row: ClientUsageRow;
+  t: TFunction;
+  onRemove: RemoveRow;
+}) {
+  const showNotification = useNotificationStore((state) => state.showNotification);
+  const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
+  const name = row.label.text;
+
+  // Opening moves focus to Keep, the safe choice; closing returns it to the trigger.
+  useEffect(() => {
+    if (confirming) {
+      keepRef.current?.focus();
+      return;
+    }
+    if (!restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    triggerRef.current?.focus();
+  }, [confirming]);
+
+  const close = () => {
+    restoreFocusRef.current = true;
+    setConfirming(false);
+  };
+
+  const handleRemove = async () => {
+    if (removing) return;
+    setRemoving(true);
+    try {
+      await onRemove(row.id);
+      // The reload normally drops the row; it stays only when the reload failed.
+      close();
+    } catch {
+      // Stay open so the removal can be retried.
+      showNotification(t('dashboard.client_usage_remove_error'), 'error');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && !removing) {
+      event.preventDefault();
+      close();
+    }
+  };
+
+  if (confirming) {
+    return (
+      <RemoveKeyConfirm
+        name={name}
+        t={t}
+        withLimit={row.claudeLimit !== null}
+        removing={removing}
+        keepRef={keepRef}
+        onConfirm={() => void handleRemove()}
+        onCancel={close}
+        onKeyDown={handleKeyDown}
+      />
+    );
+  }
+  return (
+    <Button
+      ref={triggerRef}
+      type="button"
+      variant="ghost"
+      size="sm"
+      className={styles.removeAction}
+      onClick={() => setConfirming(true)}
+      aria-label={t('dashboard.client_usage_remove_label', { name })}
+      title={t('dashboard.client_usage_remove_hint')}
+    >
+      {t('dashboard.client_usage_remove')}
+    </Button>
+  );
+}
+
+/**
+ * The inline confirmation of a key removal, which says when the row's allowance goes too.
+ * Keep is the safe choice and receives focus through `keepRef` when the confirmation
+ * opens; Escape is handled on the whole group.
+ */
+export function RemoveKeyConfirm({
+  name,
+  t,
+  withLimit,
+  removing,
+  keepRef,
+  onConfirm,
+  onCancel,
+  onKeyDown,
+}: {
+  name: string;
+  t: TFunction;
+  withLimit: boolean;
+  removing: boolean;
+  keepRef: RefObject<HTMLButtonElement | null>;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}) {
+  const question = t(
+    withLimit
+      ? 'dashboard.client_usage_remove_confirm_limit'
+      : 'dashboard.client_usage_remove_confirm',
+    { name }
+  );
+  return (
+    <span className={styles.removeConfirm} role="group" aria-label={question} onKeyDown={onKeyDown}>
+      <span>{question}</span>
+      <Button
+        type="button"
+        variant="danger"
+        size="sm"
+        className={styles.removeAction}
+        onClick={onConfirm}
+        loading={removing}
+        aria-label={t('dashboard.client_usage_remove_yes_label', { name })}
+      >
+        {t('dashboard.client_usage_remove')}
+      </Button>
+      <Button
+        ref={keepRef}
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={styles.removeAction}
+        onClick={onCancel}
+        disabled={removing}
+      >
+        {t('dashboard.client_usage_remove_no')}
       </Button>
     </span>
   );

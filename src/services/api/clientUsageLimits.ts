@@ -49,16 +49,19 @@ const resolvesTo = (entryKey: string, keyId: string): boolean => {
  * are written exactly as read, zero values and untrimmed keys included, so a save never
  * alters another operator's configuration. `assertConnection` was captured when the save
  * was requested and aborts it before reading and before writing if the connection changed.
+ * With `onlyIfConfigured`, a map without an entry for `id` is left as it is.
  */
 const writeLimit = async (
   id: string,
   value: number | null,
-  assertConnection: () => void
+  assertConnection: () => void,
+  onlyIfConfigured = false
 ): Promise<void> => {
   assertConnection();
   const raw = await readRawLimits();
   assertConnection();
   const entries = Object.entries(raw).filter(([entryKey]) => !resolvesTo(entryKey, id));
+  if (onlyIfConfigured && entries.length === Object.keys(raw).length) return;
   const limit = normalizeClientUsageLimit(value);
   if (limit !== null) entries.push([id, limit]);
   if (entries.length > 0) {
@@ -77,6 +80,20 @@ const writeLimit = async (
 // reads the map only after the previous save (from any row) has been written.
 let lastWrite: Promise<unknown> = Promise.resolve();
 
+const enqueueWrite = (
+  keyId: string,
+  value: number | null,
+  onlyIfConfigured: boolean
+): Promise<void> => {
+  const id = keyId.trim();
+  if (!id) throw new RangeError('Client key id is required');
+  // Bound to the connection the save was requested on, even while it waits its turn.
+  const assertConnection = guardConfigConnection();
+  const write = lastWrite.then(() => writeLimit(id, value, assertConnection, onlyIfConfigured));
+  lastWrite = write.catch(() => undefined);
+  return write;
+};
+
 export const clientUsageLimitsApi = {
   async get(): Promise<ClientUsageLimits> {
     const limits: ClientUsageLimits = {};
@@ -90,16 +107,19 @@ export const clientUsageLimitsApi = {
 
   /** Sets or, with `null`/`0`, removes the allowance of the key with id `keyId`. */
   async set(keyId: string, value: number | null): Promise<void> {
-    const id = keyId.trim();
-    if (!id) throw new RangeError('Client key id is required');
     // Only null (or a value that rounds to 0) clears; a non-finite number is a bug.
     if (value !== null && !Number.isFinite(value)) {
       throw new RangeError('Client key allowance must be a finite number');
     }
-    // Bound to the connection the save was requested on, even while it waits its turn.
-    const assertConnection = guardConfigConnection();
-    const write = lastWrite.then(() => writeLimit(id, value, assertConnection));
-    lastWrite = write.catch(() => undefined);
-    return write;
+    return enqueueWrite(keyId, value, false);
+  },
+
+  /**
+   * Removes the allowance of the key with id `keyId` as configured once every pending save
+   * has been written, so a save still in flight cannot bring it back; writes nothing when
+   * the key has none.
+   */
+  async clear(keyId: string): Promise<void> {
+    return enqueueWrite(keyId, null, true);
   },
 };

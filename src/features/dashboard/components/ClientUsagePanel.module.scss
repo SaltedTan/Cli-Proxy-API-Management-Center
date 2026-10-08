@@ -129,6 +129,11 @@ $stack-below: 760px;
   list-style: none;
   margin: 0;
   padding: 0;
+
+  // Focused only from script, after a removed row took the focus with it.
+  &:focus {
+    outline: none;
+  }
 }
 
 .row {
@@ -179,6 +184,13 @@ $stack-below: 760px;
   font-family: $font-mono;
   font-size: 11.5px;
   overflow-wrap: anywhere;
+}
+
+// Button's small size is sized for toolbars; keep these inside the meta line.
+.identityMeta .removeAction {
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .badge {
@@ -496,7 +508,8 @@ $stack-below: 760px;
   color: var(--text-tertiary);
 }
 
-.windowConfirm {
+.windowConfirm,
+.removeConfirm {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;

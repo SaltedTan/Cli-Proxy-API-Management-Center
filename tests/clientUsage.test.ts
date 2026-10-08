@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -298,7 +298,8 @@ const renderPanel = (
   usage: ClientUsageState,
   onRefresh?: () => Promise<void>,
   onSaveLimit?: (keyId: string, value: number | null) => Promise<void>,
-  onResetWindow?: (keyId: string) => Promise<void>
+  onResetWindow?: (keyId: string) => Promise<void>,
+  onRemoveKey?: (keyId: string, clearLimit: boolean) => Promise<void>
 ) =>
   renderToStaticMarkup(
     createElement(
@@ -313,6 +314,7 @@ const renderPanel = (
           onRefresh,
           onSaveLimit,
           onResetWindow,
+          onRemoveKey,
           nowMs: NOW,
         })
       )
@@ -414,6 +416,78 @@ describe('client usage API', () => {
     } finally {
       post.mockRestore();
     }
+  });
+
+  test("deletes one key's usage history through the v8 route by id", async () => {
+    const remove = spyOn(apiClient, 'delete').mockResolvedValue(undefined);
+    try {
+      await clientUsageApi.remove(` ${REMOVED_ID} `);
+      expect(remove).toHaveBeenCalledWith(`/observability/usage/clients?id=${REMOVED_ID}`, {
+        timeout: 15000,
+      });
+      await clientUsageApi.remove('a b&c');
+      expect(remove).toHaveBeenLastCalledWith('/observability/usage/clients?id=a%20b%26c', {
+        timeout: 15000,
+      });
+      // Never a request without an id: only ever one key is deleted.
+      await expect(clientUsageApi.remove('  ')).rejects.toBeInstanceOf(RangeError);
+      expect(remove).toHaveBeenCalledTimes(2);
+      // A key the backend no longer tracks has nothing left to delete.
+      remove.mockRejectedValueOnce(Object.assign(new Error('not found'), { status: 404 }));
+      await clientUsageApi.remove(REMOVED_ID);
+      // Other failures propagate to the caller.
+      for (const error of [{ status: 500 }, { status: 401 }, new Error('network')]) {
+        remove.mockRejectedValueOnce(error);
+        await expect(clientUsageApi.remove(REMOVED_ID)).rejects.toBe(error);
+      }
+    } finally {
+      remove.mockRestore();
+    }
+  });
+
+  describe('removing a key', () => {
+    const LIMITS = '/config/access/api-key-limits';
+    const HISTORY = `/observability/usage/clients?id=${REMOVED_ID}`;
+    const spies: Array<{ mockRestore(): void }> = [];
+    const spy = <K extends 'get' | 'put' | 'delete' | 'getConnectionRevision'>(method: K) => {
+      const created = spyOn(apiClient, method);
+      spies.push(created);
+      return created;
+    };
+    afterEach(() => spies.splice(0).forEach((created) => created.mockRestore()));
+
+    test('clears the allowance as configured, then deletes the history', async () => {
+      const calls: string[] = [];
+      spy('get').mockImplementation(async (url: string) => {
+        calls.push(`GET ${url}`);
+        return { [REMOVED_ID]: 0.5, [PHONE_ID]: 0.25 };
+      });
+      spy('put').mockImplementation(async (url: string) => {
+        calls.push(`PUT ${url}`);
+      });
+      spy('delete').mockImplementation(async (url: string) => {
+        calls.push(`DELETE ${url}`);
+      });
+      await clientUsageApi.removeKey(REMOVED_ID, true);
+      expect(calls).toEqual([`GET ${LIMITS}`, `PUT ${LIMITS}`, `DELETE ${HISTORY}`]);
+      // Without allowances (an older backend) the config is not touched.
+      calls.length = 0;
+      await clientUsageApi.removeKey(REMOVED_ID, false);
+      expect(calls).toEqual([`DELETE ${HISTORY}`]);
+    });
+
+    test('does not delete on another server when the connection changes meanwhile', async () => {
+      const revision = spy('getConnectionRevision').mockReturnValue(1);
+      spy('get').mockResolvedValue({ [REMOVED_ID]: 0.5 });
+      // The dashboard switches servers while the allowance is being cleared.
+      spy('delete').mockImplementation(async (url: string) => {
+        if (url === LIMITS) revision.mockReturnValue(2);
+      });
+      await expect(clientUsageApi.removeKey(REMOVED_ID, true)).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+      expect(apiClient.delete).not.toHaveBeenCalledWith(HISTORY, expect.anything());
+    });
   });
 
   test('drops or defaults malformed entries instead of throwing', () => {
@@ -1153,6 +1227,63 @@ describe('client usage panel rendering', () => {
     expect(markup).not.toContain('dashboard.client_usage_');
   });
 
+  test('offers to remove keys that are no longer in config', () => {
+    const removeKey = async () => undefined;
+    const markup = renderPanel(
+      { status: 'ready', data: snapshot },
+      onRefresh,
+      undefined,
+      undefined,
+      removeKey
+    );
+    const removeLabel = (name: string) =>
+      `aria-label="${html(t('dashboard.client_usage_remove_label', { name }))}"`;
+    // Keys marked "Not in config", with usage or only an allowance, get the control.
+    for (const name of [REMOVED_ID, LIMIT_ONLY_ID]) {
+      expect(markup).toContain(removeLabel(name));
+    }
+    // Configured keys, used or not, do not.
+    for (const name of ['MacBook', 'Phone', 'fixt...ktop']) {
+      expect(markup).not.toContain(removeLabel(name));
+    }
+    expect(markup).toContain(`title="${html(t('dashboard.client_usage_remove_hint'))}"`);
+    // Confirmation is asked only after a click.
+    for (const question of [
+      'dashboard.client_usage_remove_confirm',
+      'dashboard.client_usage_remove_confirm_limit',
+    ]) {
+      expect(markup).not.toContain(html(t(question, { name: REMOVED_ID })));
+    }
+    // The list can take the focus a removed row leaves behind.
+    expect(markup).toMatch(/<ul [^>]*tabindex="-1"/);
+    expect(markup).not.toContain('dashboard.client_usage_');
+
+    // Requests without a key are not a removed key.
+    const anonymous = renderPanel(
+      ready({
+        keys: [
+          {
+            id: 'anonymous',
+            configured: false,
+            last_used_at: '2026-10-07T11:00:00Z',
+            totals: { requests: 2, tokens: tokens(100) },
+          },
+        ],
+      }),
+      onRefresh,
+      undefined,
+      undefined,
+      removeKey
+    );
+    expect(anonymous).toContain(t('dashboard.client_usage_anonymous'));
+    expect(anonymous).not.toContain(removeLabel(t('dashboard.client_usage_anonymous')));
+
+    // Without the handler (disconnected) the key is still flagged, with no control.
+    const readOnly = renderPanel({ status: 'ready', data: snapshot }, onRefresh);
+    expect(readOnly).toContain(t('dashboard.client_usage_not_in_config'));
+    expect(readOnly).not.toContain(removeLabel(REMOVED_ID));
+  });
+
   test('asks for one key per device when all devices share one', () => {
     const markup = renderPanel(
       ready({
@@ -1254,6 +1385,26 @@ describe('client usage panel rendering', () => {
       new URL('../src/features/dashboard/DashboardPage.tsx', import.meta.url)
     ).text();
     expect(page).toContain('onResetWindow={connected ? resetClientWindow : undefined}');
+  });
+
+  test('removing a key reloads usage and the config cache either way', async () => {
+    const source = await Bun.file(
+      new URL('../src/features/dashboard/hooks/useDashboardOverview.ts', import.meta.url)
+    ).text();
+    const remove = source.slice(source.indexOf('const removeClientKey = useCallback'));
+    const body = remove.slice(0, remove.indexOf('\n  );'));
+    // The order of the steps and the connection guard live in clientUsageApi.removeKey.
+    const call = body.indexOf('await clientUsageApi.removeKey(keyId, clearLimit)');
+    expect(call).toBeGreaterThan(-1);
+    // Either step may have succeeded before the other failed, so the reload always runs.
+    const reload = body.slice(body.indexOf('} finally {'));
+    expect(body.indexOf('} finally {')).toBeGreaterThan(call);
+    expect(reload).toContain('refreshClientUsage()');
+    expect(reload).toContain('clearLimit ? fetchConfig(true)');
+    const page = await Bun.file(
+      new URL('../src/features/dashboard/DashboardPage.tsx', import.meta.url)
+    ).text();
+    expect(page).toContain('onRemoveKey={connected ? removeClientKey : undefined}');
   });
 });
 

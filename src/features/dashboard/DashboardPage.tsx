@@ -60,6 +60,7 @@ export function DashboardPage() {
     refreshClientUsage,
     saveClientLimit,
     resetClientWindow,
+    removeClientKey,
   } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
@@ -435,6 +436,7 @@ export function DashboardPage() {
           onRefresh={connected ? refreshClientUsage : undefined}
           onSaveLimit={connected ? saveClientLimit : undefined}
           onResetWindow={connected ? resetClientWindow : undefined}
+          onRemoveKey={connected ? removeClientKey : undefined}
         />
       </section>
 

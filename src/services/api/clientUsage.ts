@@ -1,4 +1,6 @@
 import { apiClient } from './client';
+import { clientUsageLimitsApi } from './clientUsageLimits';
+import { guardConfigConnection } from './configValue';
 import { isRecord } from '@/utils/helpers';
 import type {
   ClaudeCredentialRef,
@@ -232,5 +234,34 @@ export const clientUsageApi = {
       undefined,
       { timeout: CLIENT_USAGE_TIMEOUT_MS }
     );
+  },
+
+  /**
+   * Deletes the key's usage history; the backend then lists it only while it is configured
+   * or has an allowance. A key the backend does not track (404) has nothing left to delete.
+   */
+  remove: async (keyId: string): Promise<void> => {
+    const id = keyId.trim();
+    if (!id) throw new RangeError('Client key id is required');
+    try {
+      await apiClient.delete(`/observability/usage/clients?id=${encodeURIComponent(id)}`, {
+        timeout: CLIENT_USAGE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (!(isRecord(error) && error.status === 404)) throw error;
+    }
+  },
+
+  /**
+   * Removes a key from the report: with `clearLimit`, its allowance as configured once any
+   * pending allowance save is written (a key that has one stays listed), then its usage
+   * history. Bound to the connection it was requested on: if the connection changes while
+   * the allowance is cleared, the history is not deleted on the new server.
+   */
+  removeKey: async (keyId: string, clearLimit: boolean): Promise<void> => {
+    const assertConnection = guardConfigConnection();
+    if (clearLimit) await clientUsageLimitsApi.clear(keyId);
+    assertConnection();
+    await clientUsageApi.remove(keyId);
   },
 };
