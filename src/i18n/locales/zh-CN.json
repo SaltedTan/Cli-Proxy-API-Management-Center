@@ -332,7 +332,7 @@
     "client_usage_hint_shared_key": "所有设备共用一个 API 密钥，因此无法区分各设备的用量。请在“配置面板 → 客户端 API 密钥”中为每台设备添加一个密钥，并让每台设备使用自己的密钥。",
     "client_usage_hint_removed_keys": "已不在配置中的密钥的用量仍会列出（{{count}} 个），并标记为“不在配置中”，直到将其移除。",
     "client_usage_hint_link": "打开 API 密钥",
-    "client_usage_footnote": "1 Pro 单位 = Claude Pro 一周的额度（Team 1.25，Max 5x 2，Max 20x 10）。每台设备的 Claude 用量根据各凭证的每周使用率估算。每个密钥的一周从其第一次 Claude 请求开始，7 天后重置。",
+    "client_usage_footnote": "1 Pro 单位 = Claude Pro 一周的额度。其他套餐为近似值：Max 5x ≈ 5（Pro 的 5 倍），Max 20x ≈ 10（Max 5x 的 2 倍），Team ≈ 1.25。每台设备的 Claude 用量根据各凭证的每周使用率估算。每个密钥的一周从其第一次 Claude 请求开始，7 天后重置。",
     "client_usage_link": "管理客户端 API 密钥",
     "cta_eyebrow": "下一步",
     "cta_title": "接下来去哪里",

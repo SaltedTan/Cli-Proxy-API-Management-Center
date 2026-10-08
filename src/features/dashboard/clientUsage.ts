@@ -477,7 +477,7 @@ function roundAsDisplayed(value: number, digits: number): number {
   );
 }
 
-/** Plan allowances are exact (`1`, `1.25`, `10`). */
+/** Plan allowances are exact (`1`, `1.25`, `5`, `10`). */
 export function formatPlanAllowance(value: number, locale?: string): string {
   return value.toLocaleString(locale, { maximumFractionDigits: 2 });
 }

@@ -332,7 +332,7 @@
     "client_usage_hint_shared_key": "All devices share one API key, so their usage cannot be told apart. Add one key per device under Config Panel → Client API Keys and give each device its own.",
     "client_usage_hint_removed_keys": "Usage from keys no longer in config stays listed ({{count}}), marked “Not in config”, until you remove it.",
     "client_usage_hint_link": "Open API keys",
-    "client_usage_footnote": "1 Pro unit = one week of Claude Pro (Team 1.25, Max 5x 2, Max 20x 10). Claude usage per device is estimated from each credential's weekly utilization. Each key's week starts with its first Claude request and resets 7 days later.",
+    "client_usage_footnote": "1 Pro unit = one week of Claude Pro. Other plans are approximate: Max 5x ≈ 5 (5× Pro), Max 20x ≈ 10 (2× Max 5x), Team ≈ 1.25. Claude usage per device is estimated from each credential's weekly utilization. Each key's week starts with its first Claude request and resets 7 days later.",
     "client_usage_link": "Manage client API keys",
     "cta_eyebrow": "Next",
     "cta_title": "Where to go from here",

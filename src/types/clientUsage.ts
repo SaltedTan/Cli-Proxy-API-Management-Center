@@ -41,7 +41,7 @@ export interface ClaudeCredentialRef {
   authIndex?: string;
   label?: string;
   plan: ClaudePlanId | string;
-  /** Weekly allowance in Claude Pro units (Pro 1, Team 1.25, Max 5x 2, Max 20x 10). */
+  /** Weekly allowance in Claude Pro units (Pro 1, Team 1.25, Max 5x 5, Max 20x 10). */
   planProUnits: number;
   /** `weight` when the allowance falls back to the credential weight. */
   planSource: string;
