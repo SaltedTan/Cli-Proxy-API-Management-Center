@@ -16,6 +16,8 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
 import { IconChevronDown, IconPencil, IconRefreshCw } from '@/components/ui/icons';
 import { useNotificationStore } from '@/stores/useNotificationStore';
+import type { Config } from '@/types';
+import type { AuthFileItem } from '@/types/authFile';
 import type { ClaudeCredentialUsage } from '@/types/clientUsage';
 import { formatCompactNumber, formatPercent } from '@/utils/format';
 import { formatRelativeInstant } from '@/utils/quota/relativeTime';
@@ -24,6 +26,7 @@ import type { ClientUsageState } from '../hooks/useClientUsage';
 import {
   buildClientUsageRows,
   claudeLimitTone,
+  claudeCredentialName,
   claudeWindowIdentity,
   claudePlanLabel,
   clientUsageHints,
@@ -42,6 +45,7 @@ import {
   type ClientUsageRow,
 } from '../clientUsage';
 import { clientKeyMutations, isClientKeyBusy } from '../clientKeyMutations';
+import { buildCredentialLabels } from '../routing';
 import { Meter } from './Meter';
 import dash from '../dashboard.module.scss';
 import styles from './ClientUsagePanel.module.scss';
@@ -73,6 +77,12 @@ export interface ClientUsagePanelProps {
   usage: ClientUsageState;
   /** Names saved in this browser for configured keys, by key id. */
   localNames: ReadonlyMap<string, string>;
+  /**
+   * Name Claude credentials as the routing panel does, telling apart credentials that
+   * share an email by organization; without them the backend's labels are shown.
+   */
+  config?: Config | null;
+  authFiles?: AuthFileItem[] | null;
   /** Reloads this panel's data without the rest of the dashboard; omitted hides the button. */
   onRefresh?: () => Promise<void>;
   /** Omitted (or a backend without `claude_limits_supported`) hides the allowance editor. */
@@ -88,6 +98,8 @@ export interface ClientUsagePanelProps {
 export function ClientUsagePanel({
   usage,
   localNames,
+  config = null,
+  authFiles = null,
   onRefresh,
   onSaveLimit,
   onResetWindow,
@@ -138,6 +150,10 @@ export function ClientUsagePanel({
     [data, localNames, anonymousLabel, now]
   );
   const hints = useMemo(() => (data ? clientUsageHints(data.keys) : []), [data]);
+  const credentialLabels = useMemo(
+    () => buildCredentialLabels(authFiles, config),
+    [authFiles, config]
+  );
   const anyUsage = rows.some((row) => row.used);
   // Older backends report usage but do not enforce limits; do not offer to edit them.
   const saveLimit = data?.claudeLimitsSupported ? onSaveLimit : undefined;
@@ -236,6 +252,7 @@ export function ClientUsagePanel({
                 t={t}
                 locale={locale}
                 now={now}
+                credentialLabels={credentialLabels}
                 onSaveLimit={saveLimit}
                 onResetWindow={onResetWindow}
                 onRemove={removeKey}
@@ -253,6 +270,7 @@ export function ClientUsagePanel({
               <CredentialCard
                 key={credential.authId}
                 credential={credential}
+                name={claudeCredentialName(credential, credentialLabels)}
                 t={t}
                 locale={locale}
                 now={now}
@@ -301,6 +319,7 @@ function UsageRow({
   t,
   locale,
   now,
+  credentialLabels,
   onSaveLimit,
   onResetWindow,
   onRemove,
@@ -309,6 +328,7 @@ function UsageRow({
   t: TFunction;
   locale: string;
   now: number;
+  credentialLabels: ReadonlyMap<string, string>;
   onSaveLimit?: SaveClientLimit;
   onResetWindow?: ResetClientWindow;
   onRemove?: RemoveRow;
@@ -439,7 +459,7 @@ function UsageRow({
                   {claudeCredentials.map((credential) => (
                     <li key={credential.authId}>
                       {[
-                        credential.label || credential.authId,
+                        claudeCredentialName(credential, credentialLabels),
                         claudePlanLabel(t, credential.plan, credential.planSource),
                         t('dashboard.client_usage_credential_share', {
                           value: formatLimitFraction(credential.currentFraction),
@@ -1077,16 +1097,17 @@ export function RemoveKeyConfirm({
 
 function CredentialCard({
   credential,
+  name,
   t,
   locale,
   now,
 }: {
   credential: ClaudeCredentialUsage;
+  name: string;
   t: TFunction;
   locale: string;
   now: number;
 }) {
-  const name = credential.label || credential.authId;
   const plan = claudePlanLabel(t, credential.plan, credential.planSource);
   const allowance = t('dashboard.client_usage_plan_allowance', {
     value: formatPlanAllowance(credential.planProUnits, locale),

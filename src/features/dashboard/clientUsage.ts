@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next';
 import { apiKeyNameFingerprint } from '@/features/config/apiKeyNames';
 import { normalizeClientUsageLimit } from '@/services/api/clientUsageLimits';
 import type {
+  ClaudeCredentialRef,
   ClientKeyClaudeCredentialUsage,
   ClientKeyClaudeUsage,
   ClientKeyUsage,
@@ -9,6 +10,7 @@ import type {
   ClientUsageModel,
   ClientUsageSnapshot,
 } from '@/types/clientUsage';
+import { normalizeAuthIndex } from '@/utils/authIndex';
 import { ANONYMOUS_CLIENT_KEY_ID, clientKeyId } from '@/utils/clientKeyId';
 import { formatPercent } from '@/utils/format';
 import { DAY_MS } from '@/utils/time/durations';
@@ -401,6 +403,20 @@ export function clientUsageHints(keys: readonly ClientKeyUsage[]): ClientUsageHi
   ).length;
   if (removed > 0) hints.push({ kind: 'removed-keys', count: removed });
   return hints;
+}
+
+/**
+ * A Claude credential's display name: the routing panel's label for its auth index
+ * (`buildCredentialLabels`), which tells apart credentials that share an email by
+ * organization, then the backend's label, then the auth id. The backend's label is the
+ * account email, identical for one email in several organizations.
+ */
+export function claudeCredentialName(
+  credential: Pick<ClaudeCredentialRef, 'authId' | 'authIndex' | 'label'>,
+  labels: ReadonlyMap<string, string>
+): string {
+  const authIndex = normalizeAuthIndex(credential.authIndex);
+  return (authIndex && labels.get(authIndex)) || credential.label || credential.authId;
 }
 
 const PLAN_LABEL_KEYS: Record<string, string> = {

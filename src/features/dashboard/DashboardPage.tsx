@@ -433,6 +433,8 @@ export function DashboardPage() {
         <ClientUsagePanel
           usage={clientUsage}
           localNames={clientKeyNames}
+          config={config}
+          authFiles={authFiles}
           onRefresh={connected ? refreshClientUsage : undefined}
           onSaveLimit={connected ? saveClientLimit : undefined}
           onResetWindow={connected ? resetClientWindow : undefined}
