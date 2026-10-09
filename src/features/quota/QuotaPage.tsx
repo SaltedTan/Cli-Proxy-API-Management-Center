@@ -93,32 +93,43 @@ export function QuotaPage() {
   const sessionGeneration = useQuotaStore((state) => state.cacheGeneration);
   const [filesGeneration, setFilesGeneration] = useState<number | null>(null);
   const listRequestRef = useRef(0);
-  const loadFiles = useCallback(async () => {
-    const requestId = ++listRequestRef.current;
-    if (connectionStatus !== 'connected') {
-      setFiles([]);
-      setFilesGeneration(null);
-      setLoading(false);
-      return;
-    }
-    const isCurrent = () =>
-      requestId === listRequestRef.current &&
-      sessionGeneration === useQuotaStore.getState().cacheGeneration;
-    setLoading(true);
-    setError('');
-    try {
-      const data = await authFilesApi.list();
-      if (!isCurrent()) return;
-      setFiles(data?.files || []);
-      setFilesGeneration(sessionGeneration);
-    } catch (err: unknown) {
-      if (!isCurrent()) return;
-      const message = err instanceof Error ? err.message : t('notification.refresh_failed');
-      setError(message);
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }, [connectionStatus, sessionGeneration, t]);
+  // A background load keeps the current list on screen and drops a failure
+  // silently; the next foreground load reports it.
+  const loadFiles = useCallback(
+    async ({ background = false }: { background?: boolean } = {}) => {
+      const requestId = ++listRequestRef.current;
+      if (connectionStatus !== 'connected') {
+        setFiles([]);
+        setFilesGeneration(null);
+        setLoading(false);
+        return;
+      }
+      const isCurrent = () =>
+        requestId === listRequestRef.current &&
+        sessionGeneration === useQuotaStore.getState().cacheGeneration;
+      if (!background) {
+        setLoading(true);
+        setError('');
+      }
+      try {
+        const data = await authFilesApi.list();
+        if (!isCurrent()) return;
+        setFiles(data?.files || []);
+        setFilesGeneration(sessionGeneration);
+      } catch (err: unknown) {
+        if (!isCurrent() || background) return;
+        const message = err instanceof Error ? err.message : t('notification.refresh_failed');
+        setError(message);
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    },
+    [connectionStatus, sessionGeneration, t]
+  );
+
+  const reloadFilesInBackground = useCallback(() => {
+    void loadFiles({ background: true });
+  }, [loadFiles]);
 
   useHeaderRefresh(loadFiles);
 
@@ -320,7 +331,10 @@ export function QuotaPage() {
   /* ---------- 加载与操作 ---------- */
 
   const { batchLoading, loadQuota } = useQuotaBatchLoader();
-  const { resettingQuotaName, refreshQuota, resetQuota } = useQuotaActions(disableControls);
+  const { resettingQuotaName, refreshQuota, resetQuota } = useQuotaActions(
+    disableControls,
+    reloadFilesInBackground
+  );
 
   const pendingRefreshRef = useRef<number | null>(null);
   const prevLoadingRef = useRef(loading);
