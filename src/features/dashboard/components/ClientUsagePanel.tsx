@@ -30,6 +30,7 @@ import {
   claudeWindowIdentity,
   claudePlanLabel,
   clientUsageHints,
+  clientUsageServerNow,
   clientUsageToday,
   formatClaudeLimitInput,
   formatLimitFraction,
@@ -143,6 +144,8 @@ export function ClientUsagePanel({
   };
 
   const data = usage.status === 'ready' ? usage.data : null;
+  // Backend instants (windows, resets, last use) are compared on the server's timeline.
+  const serverNow = data ? clientUsageServerNow(data, now) : now;
   const sinceMs = data?.sinceMs ?? null;
   const anonymousLabel = t('dashboard.client_usage_anonymous');
   const rows = useMemo(
@@ -151,11 +154,11 @@ export function ClientUsagePanel({
         ? buildClientUsageRows(data.keys, {
             localNames,
             anonymousLabel,
-            today: clientUsageToday(data, now),
-            nowMs: now,
+            today: clientUsageToday(data, serverNow),
+            nowMs: serverNow,
           })
         : [],
-    [data, localNames, anonymousLabel, now]
+    [data, localNames, anonymousLabel, serverNow]
   );
   const hints = useMemo(() => (data ? clientUsageHints(data.keys) : []), [data]);
   const credentialLabels = useMemo(
@@ -271,7 +274,7 @@ export function ClientUsagePanel({
                 row={row}
                 t={t}
                 locale={locale}
-                now={now}
+                now={serverNow}
                 credentialLabels={credentialLabels}
                 onSaveLimit={saveLimit}
                 onResetWindow={onResetWindow}
@@ -293,7 +296,7 @@ export function ClientUsagePanel({
                 name={claudeCredentialName(credential, credentialLabels)}
                 t={t}
                 locale={locale}
-                now={now}
+                now={serverNow}
               />
             ))}
           </ul>

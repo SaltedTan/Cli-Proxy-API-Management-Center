@@ -184,7 +184,10 @@ const serverDateOf = (value: unknown): string | null => {
   return TIMESTAMP_DATE_PATTERN.exec(toText(value))?.[1] ?? null;
 };
 
-export const normalizeClientUsage = (raw: unknown): ClientUsageSnapshot => {
+export const normalizeClientUsage = (
+  raw: unknown,
+  receivedAtMs: number = Date.now()
+): ClientUsageSnapshot => {
   const source = isRecord(raw) ? raw : {};
   const seen = new Set<string>();
   const keys = Array.isArray(source.keys)
@@ -201,6 +204,7 @@ export const normalizeClientUsage = (raw: unknown): ClientUsageSnapshot => {
     : [];
   return {
     generatedAtMs: toTimeMs(source.generated_at),
+    receivedAtMs,
     serverDate: serverDateOf(source.generated_at),
     sinceMs: toTimeMs(source.since),
     keys,

@@ -18,6 +18,21 @@ import type { MeterTone } from './utils';
 
 export { ANONYMOUS_CLIENT_KEY_ID, clientKeyId };
 
+/**
+ * The server's current time: the snapshot's generation instant plus the time elapsed
+ * since it arrived. Window instants are on the server's clock, so judging them against a
+ * skewed browser clock would end a window the proxy still enforces, or keep one it ended.
+ * Without both instants the browser clock is all there is.
+ */
+export function clientUsageServerNow(
+  snapshot: Pick<ClientUsageSnapshot, 'generatedAtMs' | 'receivedAtMs'>,
+  nowMs: number
+): number {
+  const { generatedAtMs, receivedAtMs } = snapshot;
+  if (generatedAtMs == null || receivedAtMs == null) return nowMs;
+  return generatedAtMs + Math.max(0, nowMs - receivedAtMs);
+}
+
 /** Tokens and requests are summarized over this many server-local days, today included. */
 export const CLIENT_USAGE_WINDOW_DAYS = 7;
 
@@ -342,7 +357,10 @@ export interface ClientUsageRowOptions {
   localNames: ReadonlyMap<string, string>;
   anonymousLabel: string;
   today: string;
-  /** Decides whether an allowance's reset instant is still ahead. */
+  /**
+   * Decides whether a window or reset instant is still ahead; on the server's timeline
+   * (`clientUsageServerNow`).
+   */
   nowMs: number;
 }
 

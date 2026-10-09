@@ -17,7 +17,9 @@ import {
   claudeLimitStatus,
   claudeWindowEnded,
   claudeWindowStatus,
+  clientUsageServerNow,
 } from '@/features/dashboard/clientUsage';
+import { normalizeClientUsage } from '@/services/api/clientUsage';
 import type {
   ClientKeyClaudeUsage,
   ClientKeyUsage,
@@ -92,8 +94,9 @@ const rowOptions = (nowMs: number) => ({
   nowMs,
 });
 
-const snapshot = (claude: ClientKeyClaudeUsage): ClientUsageSnapshot => ({
+const snapshot = (claude: ClientKeyClaudeUsage, receivedAtMs?: number): ClientUsageSnapshot => ({
   generatedAtMs: BEFORE_END,
+  receivedAtMs,
   serverDate: '2026-10-08',
   sinceMs: STARTED,
   keys: [keyWith(claude)],
@@ -101,7 +104,7 @@ const snapshot = (claude: ClientKeyClaudeUsage): ClientUsageSnapshot => ({
   claudeLimitsSupported: true,
 });
 
-const renderAt = (nowMs: number, claude: ClientKeyClaudeUsage) =>
+const renderAt = (nowMs: number, claude: ClientKeyClaudeUsage, receivedAtMs?: number) =>
   renderToStaticMarkup(
     createElement(
       I18nextProvider,
@@ -110,7 +113,7 @@ const renderAt = (nowMs: number, claude: ClientKeyClaudeUsage) =>
         MemoryRouter,
         null,
         createElement(ClientUsagePanel, {
-          usage: { status: 'ready', data: snapshot(claude) },
+          usage: { status: 'ready', data: snapshot(claude, receivedAtMs) },
           localNames: new Map(),
           onSaveLimit: async () => undefined,
           onResetWindow: async () => undefined,
@@ -205,5 +208,37 @@ describe('a key window that ended since the last snapshot', () => {
     expect(ended).toContain(
       t('dashboard.client_usage_limit_meter', { used: '0.00', limit: '2.00' })
     );
+  });
+});
+
+describe('a key window judged against a skewed browser clock', () => {
+  // The server generated the snapshot an hour before the window ends; the browser clock
+  // runs two hours ahead, so by the browser's clock the window already ended.
+  const BROWSER_AHEAD = 2 * HOUR;
+  const receivedAt = BEFORE_END + BROWSER_AHEAD;
+
+  test('places the browser time on the server timeline', () => {
+    const data = snapshot(reachedClaude(), receivedAt);
+    expect(clientUsageServerNow(data, receivedAt)).toBe(BEFORE_END);
+    expect(clientUsageServerNow(data, receivedAt + 30 * 60_000)).toBe(BEFORE_END + 30 * 60_000);
+    // Without the receipt instant there is nothing to correct with.
+    expect(clientUsageServerNow(snapshot(reachedClaude()), receivedAt)).toBe(receivedAt);
+  });
+
+  test('records when a read arrived', () => {
+    const read = normalizeClientUsage({ generated_at: '2026-10-08T11:00:00Z' }, receivedAt);
+    expect(read.receivedAtMs).toBe(receivedAt);
+  });
+
+  test('keeps a fresh reached limit until the server window ends', () => {
+    const fresh = renderAt(receivedAt, reachedClaude(), receivedAt);
+    expect(fresh).toContain(t('dashboard.client_usage_limit_reached'));
+    expect(fresh).toContain(
+      t('dashboard.client_usage_limit_meter', { used: '2.00', limit: '2.00' })
+    );
+
+    // Two server hours later the window has ended on the server's clock too.
+    const later = renderAt(receivedAt + 2 * HOUR, reachedClaude(), receivedAt);
+    expect(later).not.toContain(t('dashboard.client_usage_limit_reached'));
   });
 });

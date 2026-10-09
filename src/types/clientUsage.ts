@@ -108,7 +108,13 @@ export interface ClaudeCredentialUsage extends ClaudeCredentialRef {
 }
 
 export interface ClientUsageSnapshot {
+  /** Server clock. */
   generatedAtMs: number | null;
+  /**
+   * Browser clock when the response arrived; with `generatedAtMs` it places the browser's
+   * current time on the server's timeline. Optional for snapshots built without a read.
+   */
+  receivedAtMs?: number | null;
   /**
    * The server's local date when the snapshot was generated (`YYYY-MM-DD`), which is
    * the calendar `daily` buckets use. Null when it could not be determined.
