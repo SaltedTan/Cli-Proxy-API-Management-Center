@@ -294,7 +294,7 @@ export function claudeLimitTone(status: ClaudeLimitStatus): MeterTone {
 
 /**
  * Allowance editor text: a limit to set, `null` to clear (blank or 0), or `undefined`
- * when the text is not a non-negative number.
+ * when the text is not a non-negative number, or is a positive one too small to store.
  */
 export function parseClaudeLimitInput(text: string, badInput = false): number | null | undefined {
   // A number input reports an empty value for text it could not parse (`badInput`);
@@ -304,6 +304,8 @@ export function parseClaudeLimitInput(text: string, badInput = false): number | 
   if (!trimmed) return null;
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < 0) return undefined;
+  // `1e-324` converts to 0; only an explicit zero clears the limit.
+  if (value === 0 && /[1-9]/.test(trimmed.split(/e/i)[0])) return undefined;
   return normalizeClientUsageLimit(value);
 }
 

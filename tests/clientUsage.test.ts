@@ -978,6 +978,12 @@ describe('client usage logic', () => {
     for (const invalid of ['-1', 'abc', '1e400', 'NaN', '1,5']) {
       expect(parseClaudeLimitInput(invalid)).toBeUndefined();
     }
+    // Positive text too small for a double is not a request to clear the limit.
+    expect(parseClaudeLimitInput('1e-324')).toBeUndefined();
+    expect(parseClaudeLimitInput('0.1e-400')).toBeUndefined();
+    for (const zero of ['0.0', '0e5', '00', '.0']) {
+      expect(parseClaudeLimitInput(zero)).toBeNull();
+    }
     // A number input reports an empty value for text it could not parse; that is not
     // a request to clear the limit.
     expect(parseClaudeLimitInput('', true)).toBeUndefined();
