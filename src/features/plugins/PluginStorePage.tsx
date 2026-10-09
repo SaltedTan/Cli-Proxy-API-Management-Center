@@ -37,7 +37,12 @@ import {
   supportsPluginVersionSelection,
   type PluginReleaseVersion,
 } from './pluginReleaseVersions';
-import { waitForPluginStoreState } from './pluginPolling';
+import {
+  assertPluginConnection,
+  isStalePluginOperation,
+  waitForPluginStoreState,
+} from './pluginPolling';
+import { usePluginPollScope } from './usePluginPollScope';
 import styles from './PluginStorePage.module.scss';
 
 type StoreStatusFilter = 'all' | 'installed' | 'notInstalled' | 'updates';
@@ -466,6 +471,7 @@ export function PluginStorePage() {
   const apiBase = useAuthStore((state) => state.apiBase);
   const clearConfigCache = useConfigStore((state) => state.clearCache);
   const showNotification = useNotificationStore((state) => state.showNotification);
+  const getPollScope = usePluginPollScope();
 
   const [data, setData] = useState<PluginStoreResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -658,12 +664,14 @@ export function PluginStorePage() {
       const entryKey = getStoreEntryKey(entry);
       const failedKey = isUpdate ? 'plugin_store.update_failed' : 'plugin_store.install_failed';
       const version = requestedVersion.trim();
+      const pollScope = getPollScope();
       setInstallingKey(entryKey);
       try {
         const result = await pluginStoreApi.install(entry.id, {
           sourceId: entry.sourceId || undefined,
           version: version || undefined,
         });
+        assertPluginConnection(pollScope);
         clearConfigCache();
         const sourceId = result.sourceId || entry.sourceId;
         const installedState = await waitForPluginStoreState(
@@ -672,7 +680,8 @@ export function PluginStorePage() {
           (plugin) =>
             plugin.installed &&
             plugin.configured &&
-            (!version || pluginVersionMatches(plugin.installedVersion, version))
+            (!version || pluginVersionMatches(plugin.installedVersion, version)),
+          pollScope
         );
         setData(installedState.response);
         if (
@@ -709,7 +718,8 @@ export function PluginStorePage() {
           const registeredState = await waitForPluginStoreState(
             entry.id,
             sourceId,
-            (plugin) => plugin.registered && plugin.effectiveEnabled
+            (plugin) => plugin.registered && plugin.effectiveEnabled,
+            pollScope
           );
           setData(registeredState.response);
           if (
@@ -728,13 +738,14 @@ export function PluginStorePage() {
           'success'
         );
       } catch (err: unknown) {
+        if (isStalePluginOperation(err, pollScope)) return;
         showNotification(`${t(failedKey)}: ${getErrorMessage(err, t(failedKey))}`, 'error');
         throw err;
       } finally {
         setInstallingKey('');
       }
     },
-    [clearConfigCache, showNotification, t]
+    [clearConfigCache, getPollScope, showNotification, t]
   );
 
   const handleInstall = (entry: PluginStoreEntry) => {

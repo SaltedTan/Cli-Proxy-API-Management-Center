@@ -37,7 +37,13 @@ import {
   notifyPluginResourcesChanged,
   resolvePluginAssetURL,
 } from './pluginResources';
-import { waitForPluginState } from './pluginPolling';
+import {
+  assertPluginConnection,
+  isStalePluginOperation,
+  waitForPluginState,
+  type PluginPollScope,
+} from './pluginPolling';
+import { usePluginPollScope } from './usePluginPollScope';
 import { getPluginLogo } from './pluginLogo';
 import styles from './PluginsPage.module.scss';
 
@@ -70,6 +76,7 @@ export function PluginsPage() {
   const clearConfigCache = useConfigStore((state) => state.clearCache);
   const showNotification = useNotificationStore((state) => state.showNotification);
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
+  const getPollScope = usePluginPollScope();
 
   const [data, setData] = useState<PluginListResponse | null>(null);
   const [storeLogos, setStoreLogos] = useState<{
@@ -113,11 +120,18 @@ export function PluginsPage() {
   }, [connected, t]);
 
   const waitForPluginRuntimeState = useCallback(
-    async (id: string, enabled: boolean): Promise<PluginRuntimeWaitStatus> => {
-      const result = await waitForPluginState(id, (item, response) =>
-        enabled
-          ? !response.pluginsEnabled || (item.registered && item.effectiveEnabled)
-          : !item.effectiveEnabled
+    async (
+      id: string,
+      enabled: boolean,
+      pollScope: PluginPollScope
+    ): Promise<PluginRuntimeWaitStatus> => {
+      const result = await waitForPluginState(
+        id,
+        (item, response) =>
+          enabled
+            ? !response.pluginsEnabled || (item.registered && item.effectiveEnabled)
+            : !item.effectiveEnabled,
+        pollScope
       );
       setData(result.response);
       if (enabled && !result.response.pluginsEnabled) {
@@ -243,10 +257,12 @@ export function PluginsPage() {
   const handleTogglePlugin = async (plugin: PluginListEntry, enabled: boolean) => {
     if (deletingID) return;
     setMutatingID(plugin.id);
+    const pollScope = getPollScope();
     try {
       await pluginsApi.updateEnabled(plugin.id, enabled);
+      assertPluginConnection(pollScope);
       clearConfigCache();
-      const status = await waitForPluginRuntimeState(plugin.id, enabled);
+      const status = await waitForPluginRuntimeState(plugin.id, enabled, pollScope);
       if (status === 'ready') {
         notifyPluginResourcesChanged();
         showNotification(t('plugin_management.toggle_success'), 'success');
@@ -261,6 +277,7 @@ export function PluginsPage() {
         );
       }
     } catch (err: unknown) {
+      if (isStalePluginOperation(err, pollScope)) return;
       showNotification(
         `${t('plugin_management.toggle_failed')}: ${getErrorMessage(
           err,
@@ -333,13 +350,15 @@ export function PluginsPage() {
     }
 
     setMutatingID(editingPlugin.id);
+    const pollScope = getPollScope();
     try {
       await pluginsApi.patchConfig(editingPlugin.id, patch);
+      assertPluginConnection(pollScope);
       clearConfigCache();
       const enabledChanged =
         typeof patch.enabled === 'boolean' && patch.enabled !== editingPlugin.enabled;
       const status = enabledChanged
-        ? await waitForPluginRuntimeState(editingPlugin.id, patch.enabled === true)
+        ? await waitForPluginRuntimeState(editingPlugin.id, patch.enabled === true, pollScope)
         : await loadPlugins().then((): PluginRuntimeWaitStatus => 'ready');
       if (status === 'ready') {
         notifyPluginResourcesChanged();
@@ -359,6 +378,7 @@ export function PluginsPage() {
         );
       }
     } catch (err: unknown) {
+      if (isStalePluginOperation(err, pollScope)) return;
       showNotification(
         `${t('plugin_management.save_failed')}: ${getErrorMessage(
           err,
