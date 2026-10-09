@@ -326,6 +326,7 @@
     "client_usage_remove_yes_label": "确认移除 {{name}}",
     "client_usage_remove_no": "保留",
     "client_usage_remove_error": "无法移除该密钥。",
+    "client_usage_key_busy": "该密钥的另一项更改仍在进行中。",
     "client_usage_window_closed": "每周窗口已重置，等待下一次响应",
     "client_usage_unattributed": "{{value}} 未归属：来自代理之外，或当时没有待归属的密钥",
     "client_usage_hint_no_keys": "所有请求都未携带 API 密钥；请在“配置面板 → 客户端 API 密钥”中为每台设备添加一个密钥，以便区分各设备。",

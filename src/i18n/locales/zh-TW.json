@@ -326,6 +326,7 @@
     "client_usage_remove_yes_label": "確認移除 {{name}}",
     "client_usage_remove_no": "保留",
     "client_usage_remove_error": "無法移除該金鑰。",
+    "client_usage_key_busy": "該金鑰的另一項變更仍在進行中。",
     "client_usage_window_closed": "每週窗口已重設，等待下一次回應",
     "client_usage_unattributed": "{{value}} 未歸屬：來自代理之外，或當時沒有待歸屬的金鑰",
     "client_usage_hint_no_keys": "所有請求都未攜帶 API 金鑰；請在「設定面板 → 用戶端 API 金鑰」中為每台裝置新增一個金鑰，以便區分各裝置。",

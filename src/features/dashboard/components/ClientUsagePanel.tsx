@@ -41,6 +41,7 @@ import {
   type ClientUsageHint,
   type ClientUsageRow,
 } from '../clientUsage';
+import { clientKeyMutations, isClientKeyBusy } from '../clientKeyMutations';
 import { Meter } from './Meter';
 import dash from '../dashboard.module.scss';
 import styles from './ClientUsagePanel.module.scss';
@@ -61,6 +62,12 @@ export type ResetClientWindow = (keyId: string) => Promise<void>;
  */
 export type RemoveClientKey = (keyId: string, clearLimit: boolean) => Promise<void>;
 type RemoveRow = (keyId: string) => Promise<void>;
+
+/** The mutation holding the key's lock (save, reset or removal); null when it is free. */
+function useClientKeyMutation(keyId: string) {
+  const holder = () => clientKeyMutations.holder(keyId);
+  return useSyncExternalStore(clientKeyMutations.subscribe, holder, holder);
+}
 
 export interface ClientUsagePanelProps {
   usage: ClientUsageState;
@@ -487,6 +494,7 @@ export function ClaudeLimitEditorForm({
   draft,
   invalid,
   saving,
+  blocked = false,
   hintId,
   inputRef,
   onDraftChange,
@@ -499,6 +507,8 @@ export function ClaudeLimitEditorForm({
   draft: string;
   invalid: boolean;
   saving: boolean;
+  /** Another change to the key (a window reset or removal) is in flight; Save waits. */
+  blocked?: boolean;
   hintId: string;
   inputRef: RefObject<HTMLInputElement | null>;
   onDraftChange: (value: string) => void;
@@ -531,6 +541,7 @@ export function ClaudeLimitEditorForm({
         size="sm"
         className={styles.limitAction}
         loading={saving}
+        disabled={blocked}
         aria-label={t('dashboard.client_usage_limit_save', { name })}
       >
         {t('common.save')}
@@ -550,7 +561,13 @@ export function ClaudeLimitEditorForm({
         id={hintId}
         className={invalid ? `${styles.limitHint} ${styles.limitHintInvalid}` : styles.limitHint}
       >
-        {t(invalid ? 'dashboard.client_usage_limit_invalid' : 'dashboard.client_usage_limit_hint')}
+        {t(
+          invalid
+            ? 'dashboard.client_usage_limit_invalid'
+            : blocked
+              ? 'dashboard.client_usage_key_busy'
+              : 'dashboard.client_usage_limit_hint'
+        )}
       </span>
     </form>
   );
@@ -598,6 +615,9 @@ function ClaudeLimitCell({
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef(false);
   const hintId = useId();
+  // Save, reset and removal of a key exclude one another; each control waits while
+  // another holds the key.
+  const locked = useClientKeyMutation(row.id) !== null;
   const windowIdentity = claudeWindowIdentity(period);
   const confirming = windowResetConfirming(reset, windowIdentity);
 
@@ -641,11 +661,18 @@ function ClaudeLimitCell({
     if (!onResetWindow || resetting) return;
     dispatchReset({ type: 'reset' });
     try {
-      await onResetWindow(row.id);
+      await clientKeyMutations.run(row.id, 'reset', () => onResetWindow(row.id));
       dispatchReset({ type: 'reset-succeeded' });
-    } catch {
+    } catch (error) {
       // Stay open so the reset can be retried.
-      showNotification(t('dashboard.client_usage_window_reset_error'), 'error');
+      showNotification(
+        t(
+          isClientKeyBusy(error)
+            ? 'dashboard.client_usage_key_busy'
+            : 'dashboard.client_usage_window_reset_error'
+        ),
+        'error'
+      );
       dispatchReset({ type: 'reset-failed' });
     }
   };
@@ -678,11 +705,20 @@ function ClaudeLimitCell({
     }
     setSaving(true);
     try {
-      await onSave(row.id, value);
+      // Refused, not queued, while the key is being reset or removed: a save applied
+      // after a removal would bring the removed key back.
+      await clientKeyMutations.run(row.id, 'save', () => onSave(row.id, value));
       closeEditor();
-    } catch {
+    } catch (error) {
       // Stay open so the value can be corrected or retried.
-      showNotification(t('dashboard.client_usage_limit_save_error'), 'error');
+      showNotification(
+        t(
+          isClientKeyBusy(error)
+            ? 'dashboard.client_usage_key_busy'
+            : 'dashboard.client_usage_limit_save_error'
+        ),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -716,6 +752,7 @@ function ClaudeLimitCell({
             draft={draft}
             invalid={invalid}
             saving={saving}
+            blocked={locked && !saving}
             hintId={hintId}
             inputRef={inputRef}
             onDraftChange={(value) => {
@@ -741,6 +778,7 @@ function ClaudeLimitCell({
                 size="sm"
                 className={styles.limitEdit}
                 onClick={openEditor}
+                disabled={locked}
                 aria-label={editLabel}
                 title={editLabel}
               >
@@ -785,6 +823,7 @@ function ClaudeLimitCell({
                   name={name}
                   t={t}
                   resetting={resetting}
+                  blocked={locked && !resetting}
                   keepRef={keepRef}
                   onConfirm={() => void handleReset()}
                   onCancel={() => dispatchReset({ type: 'cancel' })}
@@ -798,6 +837,7 @@ function ClaudeLimitCell({
                   size="sm"
                   className={styles.windowReset}
                   onClick={openConfirm}
+                  disabled={locked}
                   aria-label={t('dashboard.client_usage_window_reset_label', { name })}
                   title={t('dashboard.client_usage_window_reset_hint')}
                 >
@@ -819,6 +859,7 @@ export function WindowResetConfirm({
   name,
   t,
   resetting,
+  blocked = false,
   keepRef,
   onConfirm,
   onCancel,
@@ -827,6 +868,8 @@ export function WindowResetConfirm({
   name: string;
   t: TFunction;
   resetting: boolean;
+  /** Another change to the key (an allowance save or removal) is in flight; Reset waits. */
+  blocked?: boolean;
   keepRef: RefObject<HTMLButtonElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
@@ -847,6 +890,7 @@ export function WindowResetConfirm({
         className={styles.limitAction}
         onClick={onConfirm}
         loading={resetting}
+        disabled={blocked}
         aria-label={t('dashboard.client_usage_window_reset_yes_label', { name })}
       >
         {t('dashboard.client_usage_window_reset_yes')}
@@ -887,6 +931,7 @@ function RemoveKeyControl({
   const keepRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(false);
   const name = row.label.text;
+  const locked = useClientKeyMutation(row.id) !== null;
 
   // Opening moves focus to Keep, the safe choice; closing returns it to the trigger.
   useEffect(() => {
@@ -908,12 +953,21 @@ function RemoveKeyControl({
     if (removing) return;
     setRemoving(true);
     try {
-      await onRemove(row.id);
+      // Held through the removal and the reload after it, so no allowance save or window
+      // reset of the key can slip in between.
+      await clientKeyMutations.run(row.id, 'remove', () => onRemove(row.id));
       // The reload normally drops the row; it stays only when the reload failed.
       close();
-    } catch {
+    } catch (error) {
       // Stay open so the removal can be retried.
-      showNotification(t('dashboard.client_usage_remove_error'), 'error');
+      showNotification(
+        t(
+          isClientKeyBusy(error)
+            ? 'dashboard.client_usage_key_busy'
+            : 'dashboard.client_usage_remove_error'
+        ),
+        'error'
+      );
     } finally {
       setRemoving(false);
     }
@@ -933,6 +987,7 @@ function RemoveKeyControl({
         t={t}
         withLimit={row.claudeLimit !== null}
         removing={removing}
+        blocked={locked && !removing}
         keepRef={keepRef}
         onConfirm={() => void handleRemove()}
         onCancel={close}
@@ -948,6 +1003,7 @@ function RemoveKeyControl({
       size="sm"
       className={styles.removeAction}
       onClick={() => setConfirming(true)}
+      disabled={locked}
       aria-label={t('dashboard.client_usage_remove_label', { name })}
       title={t('dashboard.client_usage_remove_hint')}
     >
@@ -966,6 +1022,7 @@ export function RemoveKeyConfirm({
   t,
   withLimit,
   removing,
+  blocked = false,
   keepRef,
   onConfirm,
   onCancel,
@@ -975,6 +1032,8 @@ export function RemoveKeyConfirm({
   t: TFunction;
   withLimit: boolean;
   removing: boolean;
+  /** Another change to the key (an allowance save or window reset) is in flight; Remove waits. */
+  blocked?: boolean;
   keepRef: RefObject<HTMLButtonElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
@@ -996,6 +1055,7 @@ export function RemoveKeyConfirm({
         className={styles.removeAction}
         onClick={onConfirm}
         loading={removing}
+        disabled={blocked}
         aria-label={t('dashboard.client_usage_remove_yes_label', { name })}
       >
         {t('dashboard.client_usage_remove')}

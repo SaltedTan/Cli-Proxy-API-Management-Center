@@ -326,6 +326,7 @@
     "client_usage_remove_yes_label": "Confirm removing {{name}}",
     "client_usage_remove_no": "Keep",
     "client_usage_remove_error": "The key could not be removed.",
+    "client_usage_key_busy": "Another change to this key is still in progress.",
     "client_usage_window_closed": "Weekly window has reset; waiting for the next response",
     "client_usage_unattributed": "{{value}} unattributed: from outside the proxy, or with no key pending",
     "client_usage_hint_no_keys": "All requests arrive without an API key; add one key per device under Config Panel → Client API Keys to tell devices apart.",
