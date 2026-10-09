@@ -494,29 +494,60 @@ export function formatProUnits(value: number, locale?: string): string {
 }
 
 /**
- * The "used / limit" values of an allowance, with the usual decimals or, up to the six
- * the backend reports, as many more as it takes for the values to agree with `reached`:
- * a key the proxy still admits never reads as at its limit, and a refused key never
- * reads as under it.
+ * The "used / limit" values of an allowance, with the usual decimals or, up to six, as
+ * many more as it takes for the values to agree with `reached`: a key the proxy still
+ * admits never reads as at its limit, a refused key never reads as under it, and a
+ * positive limit never reads as zero. Values closer than that are shown with as many
+ * significant digits as it takes, up to the exact value.
  */
 export function formatLimitMeterValues(
   status: ClaudeLimitStatus,
   locale?: string
 ): { used: string; limit: string } {
+  const agrees = (used: number, limit: number) => limit > 0 && used >= limit === status.reached;
   const usedDigits = proUnitsDigits(status.used);
   const limitDigits = proUnitsDigits(status.limit);
   for (let extra = 0; Math.max(usedDigits, limitDigits) + extra <= 6; extra += 1) {
     const used = roundAsDisplayed(status.used, usedDigits + extra);
     const limit = roundAsDisplayed(status.limit, limitDigits + extra);
-    if (used >= limit === status.reached) {
+    if (agrees(used, limit)) {
       return {
         used: formatDecimals(status.used, usedDigits + extra, locale),
         limit: formatDecimals(status.limit, limitDigits + extra, locale),
       };
     }
   }
+  // 17 significant digits tell any two doubles apart.
+  for (let digits = 1; digits <= 17; digits += 1) {
+    const used = roundSignificant(status.used, digits);
+    const limit = roundSignificant(status.limit, digits);
+    if (agrees(used, limit)) {
+      return {
+        used: formatSignificant(status.used, digits, locale),
+        limit: formatSignificant(status.limit, digits, locale),
+      };
+    }
+  }
   // Values from an older backend may disagree at any precision; keep the usual one.
   return { used: formatProUnits(status.used, locale), limit: formatProUnits(status.limit, locale) };
+}
+
+/** Values under a millionth in scientific notation rather than a run of zeros. */
+const significantOptions = (value: number, digits: number): Intl.NumberFormatOptions => ({
+  minimumSignificantDigits: digits,
+  maximumSignificantDigits: digits,
+  notation: value > 0 && value < 1e-6 ? 'scientific' : 'standard',
+});
+
+function formatSignificant(value: number, digits: number, locale?: string): string {
+  return value.toLocaleString(locale, significantOptions(value, digits));
+}
+
+/** The value `formatSignificant` shows. */
+function roundSignificant(value: number, digits: number): number {
+  return Number(
+    value.toLocaleString('en-US', { ...significantOptions(value, digits), useGrouping: false })
+  );
 }
 
 function proUnitsDigits(value: number): number {

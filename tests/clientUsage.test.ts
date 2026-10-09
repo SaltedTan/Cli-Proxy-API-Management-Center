@@ -946,6 +946,24 @@ describe('client usage logic', () => {
     expect(meter(0.25, 0.25, false)).toEqual({ used: '0.25', limit: '0.25' });
   });
 
+  test('never shows a limit that contradicts the stored one past six decimals', () => {
+    const meter = (used: number, limit: number, reached: boolean, locale = 'en') =>
+      formatLimitMeterValues(
+        { limit, used, remaining: 0, fraction: 0, reached, resetsAtMs: null },
+        locale
+      );
+    // Under the limit by less than six decimals show: significant digits tell them apart.
+    expect(meter(1, 1.0000001, false)).toEqual({ used: '1.0000000', limit: '1.0000001' });
+    expect(meter(1, 1.0000001, false, 'ru')).toEqual({ used: '1,0000000', limit: '1,0000001' });
+    // A positive limit never reads as zero, however small.
+    expect(meter(0, 1e-7, false)).toEqual({ used: '0', limit: '1E-7' });
+    expect(meter(0, Number.MIN_VALUE, false)).toEqual({ used: '0', limit: '5E-324' });
+    expect(meter(0.002, 0.001, true)).toEqual({ used: '0.002', limit: '0.001' });
+    // Values the usual decimals already tell apart look as before.
+    expect(meter(0, 0.004, false)).toEqual({ used: '0.000', limit: '0.004' });
+    expect(meter(0.84, 1.5, false)).toEqual({ used: '0.84', limit: '1.50' });
+  });
+
   test('parses and formats the allowance editor text', () => {
     expect(parseClaudeLimitInput('')).toBeNull();
     expect(parseClaudeLimitInput('  ')).toBeNull();
