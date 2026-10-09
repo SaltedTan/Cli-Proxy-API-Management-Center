@@ -194,6 +194,8 @@
     "refresh_stale": "重新整理失敗，顯示的是{{time}}的資料",
     "refresh_failed": "重新整理失敗，顯示的是上次載入的資料",
     "refresh_retry": "重試",
+    "widget_error": "無法顯示{{name}}。",
+    "widget_error_retry_label": "重新嘗試顯示{{name}}",
     "routing_eyebrow": "路由",
     "routing_title": "憑證選擇",
     "routing_description": "每次請求為何選中該憑證、工作階段是否保持在原憑證上，以及重試與容錯移轉發生在哪裡。",

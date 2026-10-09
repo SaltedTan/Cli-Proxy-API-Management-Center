@@ -19,6 +19,7 @@ import { Sparkline } from './components/Sparkline';
 import { ThroughputChart } from './components/ThroughputChart';
 import { RoutingPanel } from './components/RoutingPanel';
 import { ClientUsagePanel } from './components/ClientUsagePanel';
+import { WidgetErrorBoundary } from './components/WidgetErrorBoundary';
 import { routingStrategyLabelKey } from './routing';
 import { useCountUp, useRevealGroup, useRevealOnScroll } from '@/hooks/motion';
 import { providerLabel, splitWindowMinutes, toneForSuccessRate, type MeterTone } from './utils';
@@ -430,16 +431,18 @@ export function DashboardPage() {
           <h2 className={styles.sectionTitle}>{t('dashboard.client_usage_title')}</h2>
           <p className={styles.sectionDescription}>{t('dashboard.client_usage_description')}</p>
         </header>
-        <ClientUsagePanel
-          usage={clientUsage}
-          localNames={clientKeyNames}
-          config={config}
-          authFiles={authFiles}
-          onRefresh={connected ? refreshClientUsage : undefined}
-          onSaveLimit={connected ? saveClientLimit : undefined}
-          onResetWindow={connected ? resetClientWindow : undefined}
-          onRemoveKey={connected ? removeClientKey : undefined}
-        />
+        <WidgetErrorBoundary name={t('dashboard.client_usage_title')}>
+          <ClientUsagePanel
+            usage={clientUsage}
+            localNames={clientKeyNames}
+            config={config}
+            authFiles={authFiles}
+            onRefresh={connected ? refreshClientUsage : undefined}
+            onSaveLimit={connected ? saveClientLimit : undefined}
+            onResetWindow={connected ? resetClientWindow : undefined}
+            onRemoveKey={connected ? removeClientKey : undefined}
+          />
+        </WidgetErrorBoundary>
       </section>
 
       {/* ---------- Routing ---------- */}
@@ -449,12 +452,14 @@ export function DashboardPage() {
           <h2 className={styles.sectionTitle}>{t('dashboard.routing_title')}</h2>
           <p className={styles.sectionDescription}>{t('dashboard.routing_description')}</p>
         </header>
-        <RoutingPanel
-          routing={routing}
-          config={config}
-          authFiles={authFiles}
-          onRefresh={connected ? refreshRoutingPanel : undefined}
-        />
+        <WidgetErrorBoundary name={t('dashboard.routing_title')}>
+          <RoutingPanel
+            routing={routing}
+            config={config}
+            authFiles={authFiles}
+            onRefresh={connected ? refreshRoutingPanel : undefined}
+          />
+        </WidgetErrorBoundary>
       </section>
 
       {/* ---------- Credential health + runtime ---------- */}

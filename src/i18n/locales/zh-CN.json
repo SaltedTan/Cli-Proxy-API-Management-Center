@@ -194,6 +194,8 @@
     "refresh_stale": "刷新失败，显示的是{{time}}的数据",
     "refresh_failed": "刷新失败，显示的是上次加载的数据",
     "refresh_retry": "重试",
+    "widget_error": "无法显示{{name}}。",
+    "widget_error_retry_label": "重新尝试显示{{name}}",
     "routing_eyebrow": "路由",
     "routing_title": "凭证选择",
     "routing_description": "每次请求为何选中该凭证、会话是否保持在原凭证上，以及重试与故障转移发生在哪里。",

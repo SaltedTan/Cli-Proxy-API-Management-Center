@@ -194,6 +194,8 @@
     "refresh_stale": "Couldn't refresh — showing data from {{time}}",
     "refresh_failed": "Couldn't refresh — showing the last data loaded",
     "refresh_retry": "Retry",
+    "widget_error": "{{name}} could not be displayed.",
+    "widget_error_retry_label": "Try displaying {{name}} again",
     "routing_eyebrow": "Routing",
     "routing_title": "Credential selection",
     "routing_description": "Why each credential was picked, whether sessions stay on their credential, and where retries and failovers happen.",
