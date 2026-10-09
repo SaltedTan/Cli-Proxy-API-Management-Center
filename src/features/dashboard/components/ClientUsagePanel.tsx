@@ -45,8 +45,10 @@ import {
   type ClientUsageRow,
 } from '../clientUsage';
 import { clientKeyMutations, isClientKeyBusy } from '../clientKeyMutations';
+import { unrefreshedChangeNotice } from '../polledSnapshot';
 import { buildCredentialLabels } from '../routing';
 import { Meter } from './Meter';
+import { StaleDataNotice } from './StaleDataNotice';
 import dash from '../dashboard.module.scss';
 import styles from './ClientUsagePanel.module.scss';
 
@@ -56,10 +58,16 @@ const API_KEYS_ROUTE = '/config?field=apiKeys';
 // Last-used and reset times only need coarse ticks.
 const clock = createSharedClock({ intervalMs: 30_000 });
 
-/** Writes a key's Claude allowance in Pro units per 7-day window; `null` removes it. */
-export type SaveClientLimit = (keyId: string, value: number | null) => Promise<void>;
-/** Ends a key's current 7-day Claude window on the backend; its history is kept. */
-export type ResetClientWindow = (keyId: string) => Promise<void>;
+/**
+ * Writes a key's Claude allowance in Pro units per 7-day window; `null` removes it.
+ * Resolves false when the change was saved but the panel could not be reloaded.
+ */
+export type SaveClientLimit = (keyId: string, value: number | null) => Promise<boolean | void>;
+/**
+ * Ends a key's current 7-day Claude window on the backend; its history is kept. Resolves
+ * false when the window was reset but the panel could not be reloaded.
+ */
+export type ResetClientWindow = (keyId: string) => Promise<boolean | void>;
 /**
  * Deletes a key's usage history and, with `clearLimit`, its Claude allowance if one is
  * configured.
@@ -84,7 +92,7 @@ export interface ClientUsagePanelProps {
   config?: Config | null;
   authFiles?: AuthFileItem[] | null;
   /** Reloads this panel's data without the rest of the dashboard; omitted hides the button. */
-  onRefresh?: () => Promise<void>;
+  onRefresh?: () => Promise<unknown>;
   /** Omitted (or a backend without `claude_limits_supported`) hides the allowance editor. */
   onSaveLimit?: SaveClientLimit;
   /** Omitted hides the window reset; it is offered only on rows with an open window. */
@@ -220,6 +228,18 @@ export function ClientUsagePanel({
         <p className={notice.muted ? styles.muted : styles.notice} role="status">
           {notice.text}
         </p>
+      )}
+
+      {data && usage.stale && (
+        <StaleDataNotice
+          t={t}
+          locale={locale}
+          updatedAtMs={usage.updatedAtMs}
+          now={now}
+          onRetry={onRefresh ? () => void handleRefresh() : undefined}
+          retrying={refreshing}
+          retryLabel={t('dashboard.client_usage_refresh_label')}
+        />
       )}
 
       {hints.map((hint) => (
@@ -620,6 +640,11 @@ function ClaudeLimitCell({
   onResetWindow?: ResetClientWindow;
 }) {
   const showNotification = useNotificationStore((state) => state.showNotification);
+  // The change was made; say so, and that the row may not show it yet.
+  const notifyUnrefreshed = (refreshed: boolean | void, key: string) => {
+    const notice = unrefreshedChangeNotice(refreshed, key);
+    if (notice) showNotification(t(notice.key), notice.type);
+  };
   const status = row.claudeLimit;
   const period = row.claudeWindow;
   const name = row.label.text;
@@ -681,8 +706,9 @@ function ClaudeLimitCell({
     if (!onResetWindow || resetting) return;
     dispatchReset({ type: 'reset' });
     try {
-      await clientKeyMutations.run(row.id, 'reset', () => onResetWindow(row.id));
+      const refreshed = await clientKeyMutations.run(row.id, 'reset', () => onResetWindow(row.id));
       dispatchReset({ type: 'reset-succeeded' });
+      notifyUnrefreshed(refreshed, 'dashboard.client_usage_window_reset_stale');
     } catch (error) {
       // Stay open so the reset can be retried.
       showNotification(
@@ -727,8 +753,9 @@ function ClaudeLimitCell({
     try {
       // Refused, not queued, while the key is being reset or removed: a save applied
       // after a removal would bring the removed key back.
-      await clientKeyMutations.run(row.id, 'save', () => onSave(row.id, value));
+      const refreshed = await clientKeyMutations.run(row.id, 'save', () => onSave(row.id, value));
       closeEditor();
+      notifyUnrefreshed(refreshed, 'dashboard.client_usage_limit_saved_stale');
     } catch (error) {
       // Stay open so the value can be corrected or retried.
       showNotification(

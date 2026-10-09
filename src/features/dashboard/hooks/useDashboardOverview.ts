@@ -188,20 +188,25 @@ export function useDashboardOverview() {
   /**
    * Writes a key's Claude allowance (`null` clears it), then reloads the usage panel. The
    * limit lives in the access section the config store caches, so that is refreshed too.
+   * Resolves whether the usage panel could be reloaded.
    */
   const saveClientLimit = useCallback(
     async (keyId: string, value: number | null) => {
       await clientUsageLimitsApi.set(keyId, value);
-      await Promise.allSettled([refreshClientUsage(), fetchConfig(true)]);
+      const [usage] = await Promise.allSettled([refreshClientUsage(), fetchConfig(true)]);
+      return usage.status === 'fulfilled' && usage.value;
     },
     [refreshClientUsage, fetchConfig]
   );
 
-  /** Ends a key's current 7-day Claude window on the backend, then reloads the usage panel. */
+  /**
+   * Ends a key's current 7-day Claude window on the backend, then reloads the usage panel.
+   * Resolves whether the usage panel could be reloaded.
+   */
   const resetClientWindow = useCallback(
     async (keyId: string) => {
       await clientUsageApi.resetWindow(keyId);
-      await refreshClientUsage();
+      return refreshClientUsage();
     },
     [refreshClientUsage]
   );

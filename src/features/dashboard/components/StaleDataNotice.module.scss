@@ -1,0 +1,18 @@
+.stale {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px $spacing-sm;
+  padding: 6px 6px 6px 14px;
+  border-radius: $radius-md;
+  border: 1px solid color-mix(in srgb, var(--amber-color) 35%, transparent);
+  background: color-mix(in srgb, var(--amber-color) 8%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.retry {
+  margin-left: auto;
+}

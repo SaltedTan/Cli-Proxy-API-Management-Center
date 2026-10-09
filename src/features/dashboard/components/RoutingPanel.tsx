@@ -35,6 +35,7 @@ import {
   type RoutingTone,
 } from '../routing';
 import { providerLabel } from '../utils';
+import { StaleDataNotice } from './StaleDataNotice';
 import dash from '../dashboard.module.scss';
 import styles from './RoutingPanel.module.scss';
 
@@ -56,7 +57,7 @@ export interface RoutingPanelProps {
   config: Config | null;
   authFiles: AuthFileItem[] | null;
   /** Reloads this panel's data without the rest of the dashboard; omitted hides the button. */
-  onRefresh?: () => Promise<void>;
+  onRefresh?: () => Promise<unknown>;
   /** Injected by tests; the live panel follows the shared clock. */
   nowMs?: number;
 }
@@ -179,7 +180,7 @@ export function RoutingPanel({ routing, config, authFiles, onRefresh, nowMs }: R
   const showSession = decisions.some((decision) => Boolean(decision.session));
   const transportTotal = live ? live.counters.transportWebsocket + live.counters.transportHttp : 0;
   const unknownProvider = t('dashboard.provider_unknown');
-  // A failed refresh keeps the last snapshot, so this time also shows when data went stale.
+  // A failed refresh keeps the last snapshot, flagged stale below, and this time with it.
   const observedAt = live?.observedAtMs ?? null;
 
   return (
@@ -217,6 +218,18 @@ export function RoutingPanel({ routing, config, authFiles, onRefresh, nowMs }: R
         <p className={styles.notice} role="status">
           {notice}
         </p>
+      )}
+
+      {live && routing.stale && (
+        <StaleDataNotice
+          t={t}
+          locale={i18n.language}
+          updatedAtMs={routing.updatedAtMs}
+          now={now}
+          onRetry={onRefresh ? () => void handleRefresh() : undefined}
+          retrying={refreshing}
+          retryLabel={t('dashboard.routing_refresh_label')}
+        />
       )}
 
       <dl className={styles.facts}>
