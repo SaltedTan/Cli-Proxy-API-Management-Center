@@ -360,6 +360,53 @@ describe('credential availability', () => {
     ).toBeNull();
   });
 
+  test('model cooldowns behind the aggregate flag hold only their own lanes', () => {
+    // Only Opus has a recorded state, and it is cooling: the proxy marks the credential
+    // unavailable, yet still selects it for Sonnet.
+    const opus: LedgerPause = {
+      scope: 'model',
+      modelKey: 'claude-opus-4-6',
+      untilMs: NOW + HOUR_MS,
+    };
+    const aggregate = authFile({
+      unavailable: true,
+      status: 'error',
+      status_message: 'rate limited',
+      next_retry_after: new Date(NOW + HOUR_MS).toISOString(),
+    });
+    const block = credentialBlockFromAuthFile(aggregate, [opus]);
+    expect(block).toBeNull();
+    const opusWindow: LedgerWindow = {
+      ...sevenDay(60),
+      id: 'seven-day-opus',
+      label: 'Opus',
+      scope: 'scoped',
+      model: 'Opus',
+    };
+    const lanes = buildQuotaLanes(
+      { plan: null, windows: [sevenDay(60), opusWindow], pauses: [opus], block },
+      NOW
+    );
+    expect(lanes.map((lane) => [lane.id, lane.status])).toEqual([
+      ['seven-day-opus', 'partial'],
+      [OTHER_MODELS_LANE_ID, 'open'],
+    ]);
+
+    // Terminal failures still block every model, model cooldowns or not.
+    // An unauthorized credential reports no retry deadline.
+    expect(
+      credentialBlockFromAuthFile({ ...aggregate, next_retry_after: undefined }, [opus])?.reason
+    ).toBe('unavailable');
+    expect(
+      credentialBlockFromAuthFile({ ...aggregate, status_message: 'token expired' }, [opus])
+    ).toEqual(tokenExpired);
+    expect(
+      credentialBlockFromAuthFile({ ...aggregate, refreshError: { message: 'refresh failed' } }, [
+        opus,
+      ])?.reason
+    ).toBe('unavailable');
+  });
+
   test('only the flags the selector honours block a credential', () => {
     expect(credentialBlockFromAuthFile(authFile({ status: 'active' }), [])).toBeNull();
     // The list reconciles status against the selector; error without unavailable still serves.

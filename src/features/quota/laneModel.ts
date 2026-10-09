@@ -293,6 +293,10 @@ export function ledgerPausesFromCooldowns(
  * persistent authentication failure (an expired or rejected token) and for an
  * active credential-wide cooldown. The cooldown already shows as a pause with
  * an end, so only an unavailable credential without one counts as blocked.
+ *
+ * It also stays set once every model the proxy holds a state for is cooling,
+ * though the selector still picks the credential for any other model. Model
+ * pauses explain it then, and hold only their own models' lanes.
  */
 export function credentialBlockFromAuthFile(
   file: AuthFileItem,
@@ -304,8 +308,25 @@ export function credentialBlockFromAuthFile(
   }
   if (file.unavailable !== true) return null;
   if (pauses?.some((pause) => pause.scope === 'credential')) return null;
+  if (modelPausesExplainUnavailable(file, pauses)) return null;
   return {
     reason: 'unavailable',
     message: hasAuthFileStatusWarning(file) ? getAuthFileStatusMessage(file) : null,
   };
+}
+
+/**
+ * The aggregate carries the earliest model retry as `next_retry_after`; a terminal
+ * unauthorized failure clears it. An expired token blocks every model whatever its
+ * deadline, and shows as its message or a failing refresh.
+ */
+function modelPausesExplainUnavailable(
+  file: AuthFileItem,
+  pauses: readonly LedgerPause[] | null
+): boolean {
+  if (!pauses?.some((pause) => pause.scope === 'model')) return false;
+  const nextRetry = file['next_retry_after'];
+  if (typeof nextRetry !== 'string' || !nextRetry.trim()) return false;
+  if (file.refreshError) return false;
+  return getAuthFileStatusMessage(file).toLowerCase() !== 'token expired';
 }
