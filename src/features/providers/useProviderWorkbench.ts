@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { providersApi } from '@/services/api';
+import { apiClient } from '@/services/api/client';
 import { getErrorMessage } from '@/utils/helpers';
 import { useAuthStore, useConfigStore } from '@/stores';
 import {
@@ -28,6 +29,7 @@ import {
   vertexToResource,
   xaiToResource,
 } from './adapters';
+import { refreshProviderConfig } from './refreshProviderConfig';
 import { PROVIDER_BRAND_ORDER, PROVIDER_DESCRIPTORS } from './descriptors';
 import { buildRuntimePolicy } from './runtimePolicy';
 import { buildModelOptions } from './modelOptions';
@@ -481,33 +483,28 @@ export function useProviderWorkbench(): UseProviderWorkbenchResult {
   const [fetchedAt, setFetchedAt] = useState<string>(() => new Date().toISOString());
 
   const hasFetchedRef = useRef(false);
+  const refetchIdRef = useRef(0);
 
   const connected = connectionStatus === 'connected';
 
   const refetch = useCallback(async () => {
+    const requestId = ++refetchIdRef.current;
+    const revision = apiClient.getConnectionRevision();
+    const isCurrent = () =>
+      requestId === refetchIdRef.current && revision === apiClient.getConnectionRevision();
     setIsFetching(true);
     setErrorMessage(null);
     try {
-      const [configResult, vertexResult, openaiResult] = await Promise.allSettled([
-        fetchConfig(true),
-        providersApi.getVertexConfigs(),
-        providersApi.getOpenAIProviders(),
-      ]);
-      if (configResult.status !== 'fulfilled') {
-        throw configResult.reason;
+      if (await refreshProviderConfig({ fetchConfig, updateConfigValue, isCurrent })) {
+        setFetchedAt(new Date().toISOString());
       }
-      if (vertexResult.status === 'fulfilled') {
-        updateConfigValue('vertex-api-key', vertexResult.value || []);
-      }
-      if (openaiResult.status === 'fulfilled') {
-        updateConfigValue('openai-compatibility', openaiResult.value || []);
-      }
-      setFetchedAt(new Date().toISOString());
     } catch (err) {
-      setErrorMessage(getErrorMessage(err) || 'Failed to load providers');
+      if (isCurrent()) setErrorMessage(getErrorMessage(err) || 'Failed to load providers');
     } finally {
-      setIsPending(false);
-      setIsFetching(false);
+      if (requestId === refetchIdRef.current) {
+        setIsPending(false);
+        setIsFetching(false);
+      }
     }
   }, [fetchConfig, updateConfigValue]);
 
