@@ -8,8 +8,9 @@ import { IconPlug } from '@/components/ui/icons';
 import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
 import { oauthApi, pluginsApi, type BuiltInOAuthProvider } from '@/services/api';
 import { vertexApi, type VertexImportResponse } from '@/services/api/vertex';
+import { classifyOAuthCallbackError } from '@/services/api/oauthCallbackError';
 import { copyToClipboard } from '@/utils/clipboard';
-import { getErrorMessage, isRecord } from '@/utils/helpers';
+import { getErrorMessage } from '@/utils/helpers';
 import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
 import { getPluginTitle, resolvePluginAssetURL } from '@/features/plugins/pluginResources';
 import {
@@ -78,11 +79,6 @@ interface PluginOAuthProviderCard {
 }
 
 type OAuthProviderCard = BuiltInOAuthProviderCard | PluginOAuthProviderCard;
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (!isRecord(error)) return undefined;
-  return typeof error.status === 'number' ? error.status : undefined;
-}
 
 const PROVIDERS: BuiltInOAuthProviderCard[] = [
   {
@@ -582,14 +578,15 @@ export function OAuthPage() {
       showNotification(t('auth_login.oauth_callback_success'), 'success');
     } catch (err: unknown) {
       if (!attempt.isCurrent()) return;
-      const status = getErrorStatus(err);
-      const message = getErrorMessage(err);
+      const failure = classifyOAuthCallbackError(err);
       const errorMessage =
-        status === 404
+        failure.kind === 'upgrade'
           ? t('auth_login.oauth_callback_upgrade_hint', {
               defaultValue: 'Please update CLI Proxy API or check the connection.',
             })
-          : message || undefined;
+          : failure.kind === 'restart'
+            ? t('auth_login.oauth_callback_restart_hint', { message: failure.message })
+            : failure.message || undefined;
       updateProviderState(provider, {
         callbackSubmitting: false,
         callbackStatus: 'error',

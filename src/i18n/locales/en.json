@@ -1053,6 +1053,7 @@
     "oauth_callback_success": "Callback URL submitted. Continue waiting for authentication.",
     "oauth_callback_error": "Failed to submit callback URL:",
     "oauth_callback_upgrade_hint": "Please update CLI Proxy API or check the connection.",
+    "oauth_callback_restart_hint": "{{message}}. This login has expired or is unknown to the server; start the login again.",
     "oauth_callback_status_success": "Callback URL submitted, waiting for authentication...",
     "oauth_callback_status_error": "Callback URL submission failed:",
     "missing_state": "Unable to retrieve authentication state parameter",

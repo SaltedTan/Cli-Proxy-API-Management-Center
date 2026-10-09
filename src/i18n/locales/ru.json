@@ -1056,6 +1056,7 @@
     "oauth_callback_success": "Callback URL отправлен. Продолжайте ожидать аутентификацию.",
     "oauth_callback_error": "Не удалось отправить Callback URL:",
     "oauth_callback_upgrade_hint": "Обновите CLI Proxy API или проверьте подключение.",
+    "oauth_callback_restart_hint": "{{message}}. Этот вход истёк или неизвестен серверу; начните вход заново.",
     "oauth_callback_status_success": "Callback URL отправлен, ожидаем аутентификацию...",
     "oauth_callback_status_error": "Не удалось отправить Callback URL:",
     "missing_state": "Не удалось получить параметр состояния аутентификации",

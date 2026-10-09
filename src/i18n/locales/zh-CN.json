@@ -1051,6 +1051,7 @@
     "oauth_callback_success": "回调 URL 已提交，请继续等待认证。",
     "oauth_callback_error": "提交回调 URL 失败:",
     "oauth_callback_upgrade_hint": "请更新CLI Proxy API或检查连接",
+    "oauth_callback_restart_hint": "{{message}}。此登录已过期或服务器无此登录，请重新开始登录。",
     "oauth_callback_status_success": "回调 URL 已提交，等待认证中...",
     "oauth_callback_status_error": "回调 URL 提交失败:",
     "missing_state": "无法获取认证状态参数",
