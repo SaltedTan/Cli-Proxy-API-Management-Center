@@ -210,6 +210,15 @@ export function windowResetConfirming(
   return state.window !== null && state.window === window;
 }
 
+/**
+ * Whether the key's window has ended since the snapshot was taken. The backend stops
+ * counting usage against a window once it ends, and the next one opens with the key's
+ * next Claude request, so until a poll reports it the key reads as having no window.
+ */
+export function claudeWindowEnded(claude: ClientKeyClaudeUsage | null, nowMs: number): boolean {
+  return claude !== null && claude.windowResetsAtMs !== null && claude.windowResetsAtMs <= nowMs;
+}
+
 /** Null while the key has no open window (never used Claude, idle past its last window, or reset). */
 export function claudeWindowStatus(
   claude: ClientKeyClaudeUsage | null,
@@ -235,13 +244,20 @@ export interface ClaudeLimitStatus {
   resetsAtMs: number | null;
 }
 
-/** Null without a configured limit. A reset instant that has passed is treated as unknown. */
+/**
+ * Null without a configured limit. A reset instant that has passed is treated as unknown.
+ * Once the key's own window has ended, nothing counts against the limit until the next
+ * request opens a window, so the reported usage and "reached" no longer apply.
+ */
 export function claudeLimitStatus(
   claude: ClientKeyClaudeUsage | null,
   nowMs: number
 ): ClaudeLimitStatus | null {
   if (!claude || claude.limitProUnits === null || claude.limitProUnits <= 0) return null;
   const limit = claude.limitProUnits;
+  if (claudeWindowEnded(claude, nowMs)) {
+    return { limit, used: 0, remaining: limit, fraction: 0, reached: false, resetsAtMs: null };
+  }
   const used = claude.currentProUnits;
   // The key's own window end; older backends only report the credential-derived instant.
   const reportedReset = claude.windowResetsAtMs ?? claude.limitResetsAtMs;
@@ -341,6 +357,8 @@ export function buildClientUsageRows(
   const rows = keys.map<ClientUsageRow>((entry) => {
     const label = clientKeyLabel(entry, localNames, anonymousLabel);
     const nameShown = label.source === 'config' || label.source === 'local';
+    // An ended window's usage is history: the key reads like one with no window open.
+    const windowEnded = claudeWindowEnded(entry.claude, nowMs);
     return {
       id: entry.id,
       label,
@@ -350,17 +368,25 @@ export function buildClientUsageRows(
       used: clientKeyHasUsage(entry),
       lastUsedAtMs: entry.lastUsedAtMs,
       week: summarizeRecentDays(entry.daily, today),
-      claudeCurrentProUnits: claudeUsed(entry.claude) ? entry.claude.currentProUnits : null,
+      claudeCurrentProUnits: claudeUsed(entry.claude)
+        ? windowEnded
+          ? 0
+          : entry.claude.currentProUnits
+        : null,
       claudeTotalProUnits: entry.claude?.totalProUnits ?? 0,
       claudeShare: null,
       claudeLimit: claudeLimitStatus(entry.claude, nowMs),
       claudeWindow: claudeWindowStatus(entry.claude, nowMs),
-      claudeCredentials: [...(entry.claude?.credentials ?? [])].sort(
-        (a, b) =>
-          b.currentProUnits - a.currentProUnits ||
-          b.totalProUnits - a.totalProUnits ||
-          (a.label || a.authId).localeCompare(b.label || b.authId)
-      ),
+      claudeCredentials: (entry.claude?.credentials ?? [])
+        .map((credential) =>
+          windowEnded ? { ...credential, currentFraction: 0, currentProUnits: 0 } : credential
+        )
+        .sort(
+          (a, b) =>
+            b.currentProUnits - a.currentProUnits ||
+            b.totalProUnits - a.totalProUnits ||
+            (a.label || a.authId).localeCompare(b.label || b.authId)
+        ),
       topModels: topModels(entry.models),
     };
   });
