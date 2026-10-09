@@ -17,6 +17,7 @@ import {
 import { parseTimestampMs } from '@/utils/timestamp';
 import { normalizeAuthFileCooldowns, normalizeCooldownTimestamp } from './authFileCooldowns';
 import { normalizeAuthFileRefreshError } from './authFileRefreshError';
+import { decodeBlobApiError } from './blobApiError';
 
 type AuthFileStatusResponse = { status: string; disabled: boolean };
 export type AuthFileLookup = { name: string; authIndex?: string };
@@ -600,13 +601,18 @@ export const authFilesApi = {
   deleteAll: () => apiClient.delete('/credentials', { params: { all: true } }),
 
   download: async (name: string): Promise<Blob> => {
-    const response = await apiClient.getRaw(
-      `/credentials/download?name=${encodeURIComponent(name)}`,
-      {
-        responseType: 'blob',
-      }
-    );
-    return response.data as Blob;
+    try {
+      const response = await apiClient.getRaw(
+        `/credentials/download?name=${encodeURIComponent(name)}`,
+        {
+          responseType: 'blob',
+        }
+      );
+      return response.data as Blob;
+    } catch (error: unknown) {
+      await decodeBlobApiError(error);
+      throw error;
+    }
   },
 
   downloadText: async (name: string): Promise<string> => {
