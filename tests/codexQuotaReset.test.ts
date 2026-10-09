@@ -2,7 +2,10 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { TFunction } from 'i18next';
 import { CODEX_CONFIG } from '@/features/quota/providers/codex/data';
 import { apiCallApi, authFilesApi, apiClient } from '@/services/api';
-import { CODEX_RATE_LIMIT_RESET_CREDITS_CONSUME_URL } from '@/utils/quota';
+import {
+  CODEX_RATE_LIMIT_RESET_CREDITS_CONSUME_URL,
+  QuotaReadAfterResetError,
+} from '@/utils/quota';
 
 const t = ((key: string) => key) as TFunction;
 const file = { name: 'codex-test.json', auth_index: 'test-index', type: 'codex' };
@@ -18,7 +21,7 @@ afterEach(() => {
   for (const mock of mocks.splice(0)) mock.mockRestore();
 });
 
-function setup(body: unknown, statusCode = 200) {
+function setup(body: unknown, statusCode = 200, readStatus = 200) {
   const calls: string[] = [];
   const request = spyOn(apiCallApi, 'request').mockImplementation(async (payload) => {
     if (payload.url === CODEX_RATE_LIMIT_RESET_CREDITS_CONSUME_URL) {
@@ -26,7 +29,7 @@ function setup(body: unknown, statusCode = 200) {
       return response(body, statusCode);
     }
     calls.push('read');
-    return response({});
+    return response({}, readStatus);
   });
   const clear = spyOn(authFilesApi, 'resetCooldown').mockImplementation(async () => {
     calls.push('clear');
@@ -72,6 +75,14 @@ describe('Codex reset gateway cooldown', () => {
     clear.mockRejectedValue(new Error('offline'));
     await expect(reset()).rejects.toThrow('codex_quota.reset_cooldown_failed');
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  test('marks a failed quota read after a confirmed clear as such', async () => {
+    const { calls } = setup({ code: 'reset' }, 200, 503);
+    const error = await reset().catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(QuotaReadAfterResetError);
+    expect((error as QuotaReadAfterResetError).readError).toMatchObject({ status: 503 });
+    expect(calls.slice(0, 3)).toEqual(['consume', 'clear', 'read']);
   });
 
   test('rejects mismatched cooldown acknowledgements', async () => {

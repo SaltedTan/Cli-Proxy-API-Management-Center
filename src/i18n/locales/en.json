@@ -698,6 +698,7 @@
     "reset_not_confirmed": "Quota reset was not confirmed. Refresh the quota before trying again.",
     "reset_cooldown_failed": "Quota was reset, but the gateway cooldown could not be cleared. On the original connection, use Clear cooldown on the credential page; do not redeem another reset.",
     "reset_success": "Reset Codex quota for \"{{name}}\"",
+    "reset_success_refresh_failed": "Reset Codex quota for \"{{name}}\", but the quota could not be refreshed: {{message}}",
     "reset_failed": "Failed to reset Codex quota for \"{{name}}\": {{message}}",
     "plan_plus": "Plus",
     "plan_team": "Team",

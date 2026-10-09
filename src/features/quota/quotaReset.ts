@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next';
 import { apiClient } from '@/services/api';
 import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent } from '@/stores/useQuotaStore';
 import type { AuthFileItem, NotificationType } from '@/types';
+import { getStatusFromError, QuotaReadAfterResetError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { getQuotaSetter, type QuotaAdapter } from './providers';
 
@@ -10,7 +11,9 @@ import { getQuotaSetter, type QuotaAdapter } from './providers';
  *
  * A reset that succeeds has also cleared the proxy's cooldowns on the
  * credential, which the auth-file listing keeps reporting until it is fetched
- * again, so the listing is reloaded as well. Nothing is committed or reloaded
+ * again, so the listing is reloaded as well. That holds even when only the
+ * quota read after the reset failed: the reset is reported as done and the
+ * card shows the read error. Nothing is committed or reloaded
  * once the session or the management connection changed mid-flight: the result
  * describes the previous connection.
  */
@@ -40,6 +43,21 @@ export async function runQuotaReset(
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : t('common.unknown_error');
+    if (err instanceof QuotaReadAfterResetError) {
+      if (connectionRevision !== apiClient.getConnectionRevision()) return;
+      commitIfQuotaCacheCurrent(cacheGeneration, () => {
+        setQuota((prev) => ({
+          ...prev,
+          [cacheKey]: adapter.buildErrorState(message, getStatusFromError(err.readError)),
+        }));
+        notify(
+          t('codex_quota.reset_success_refresh_failed', { name: file.name, message }),
+          'warning'
+        );
+        reloadFiles();
+      });
+      return;
+    }
     commitIfQuotaCacheCurrent(cacheGeneration, () => {
       notify(t('codex_quota.reset_failed', { name: file.name, message }), 'error');
     });

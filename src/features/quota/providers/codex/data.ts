@@ -38,6 +38,7 @@ import {
   createStatusError,
   isCodexFile,
   isDisabledAuthFile,
+  QuotaReadAfterResetError,
 } from '@/utils/quota';
 import { normalizeAuthIndex } from '@/utils/authIndex';
 import type { QuotaProviderData } from '../types';
@@ -536,7 +537,12 @@ const resetCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQ
     // Redemption already succeeded: direct the operator to the existing clear action.
     throw new Error(t('codex_quota.reset_cooldown_failed'));
   }
-  return fetchCodexQuota(file, t);
+  try {
+    return await fetchCodexQuota(file, t);
+  } catch (err: unknown) {
+    // The reset and its cooldown clear are confirmed; only the follow-up read failed.
+    throw new QuotaReadAfterResetError(err);
+  }
 };
 
 export const CODEX_CONFIG: QuotaProviderData<CodexQuotaState, CodexQuotaData> = {

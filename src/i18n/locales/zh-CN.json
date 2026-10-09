@@ -696,6 +696,7 @@
     "reset_cooldown_failed": "额度已重置，但代理冷却清除失败。请在原连接的认证文件页面使用“清除冷却”，不要再次消耗重置卡。",
 
     "reset_success": "已重置 \"{{name}}\" 的 Codex 额度",
+    "reset_success_refresh_failed": "已重置 \"{{name}}\" 的 Codex 额度，但刷新额度失败：{{message}}",
     "reset_failed": "重置 \"{{name}}\" 的 Codex 额度失败：{{message}}",
     "plan_plus": "Plus",
     "plan_team": "Team",

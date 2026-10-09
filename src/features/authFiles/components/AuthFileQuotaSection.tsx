@@ -7,7 +7,11 @@ import {
   useQuotaStore,
 } from '@/stores';
 import type { AuthFileItem } from '@/types';
-import { getStatusFromError, resolveQuotaErrorMessage } from '@/utils/quota';
+import {
+  getStatusFromError,
+  QuotaReadAfterResetError,
+  resolveQuotaErrorMessage,
+} from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { isRuntimeOnlyAuthFile, type QuotaProviderType } from '@/features/authFiles/constants';
 import { Button } from '@/components/ui/Button';
@@ -136,6 +140,18 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : t('common.unknown_error');
           commitIfQuotaCacheCurrent(cacheGeneration, () => {
+            if (err instanceof QuotaReadAfterResetError) {
+              // The reset went through; only the quota read after it failed.
+              updateQuotaState((prev) => ({
+                ...prev,
+                [cacheKey]: adapter.buildErrorState(message, getStatusFromError(err.readError)),
+              }));
+              showNotification(
+                t('codex_quota.reset_success_refresh_failed', { name: file.name, message }),
+                'warning'
+              );
+              return;
+            }
             showNotification(t('codex_quota.reset_failed', { name: file.name, message }), 'error');
           });
         } finally {

@@ -11,15 +11,15 @@ import { getQuotaCacheKey } from '@/utils/quota/identity';
 const t = ((key: string) => key) as TFunction;
 const file = { name: 'codex-test.json', auth_index: 'test-index', type: 'codex' };
 const adapter = QUOTA_ADAPTERS.codex;
-const response = (body: unknown) => ({
-  statusCode: 200,
+const response = (body: unknown, statusCode = 200) => ({
+  statusCode,
   body,
   bodyText: JSON.stringify(body),
   header: {},
 });
 const mocks: Array<{ mockRestore(): void }> = [];
 
-function setup({ changeConnectionOnRead = false } = {}) {
+function setup({ changeConnectionOnRead = false, readStatus = 200 } = {}) {
   let revision = 1;
   mocks.push(spyOn(apiClient, 'getConnectionRevision').mockImplementation(() => revision));
   mocks.push(
@@ -29,7 +29,7 @@ function setup({ changeConnectionOnRead = false } = {}) {
       }
       // The quota read follows the cooldown clear.
       if (changeConnectionOnRead) revision += 1;
-      return response({});
+      return response({}, readStatus);
     })
   );
   const clear = spyOn(authFilesApi, 'resetCooldown').mockResolvedValue({
@@ -39,18 +39,22 @@ function setup({ changeConnectionOnRead = false } = {}) {
   });
   mocks.push(clear);
   const notices: NotificationType[] = [];
+  const messages: string[] = [];
   let reloads = 0;
   const run = () =>
     runQuotaReset(
       adapter,
       file,
       t,
-      (_message, type) => notices.push(type),
+      (message, type) => {
+        messages.push(message);
+        notices.push(type);
+      },
       () => {
         reloads += 1;
       }
     );
-  return { clear, notices, reloads: () => reloads, run };
+  return { clear, messages, notices, reloads: () => reloads, run };
 }
 
 beforeEach(() => {
@@ -76,6 +80,26 @@ describe('runQuotaReset', () => {
     const { clear, notices, reloads, run } = setup({ changeConnectionOnRead: true });
     await run();
     expect(clear).toHaveBeenCalledTimes(1);
+    expect(reloads()).toBe(0);
+    expect(notices).toEqual([]);
+    expect(useQuotaStore.getState().codexQuota[getQuotaCacheKey(file)]).toBeUndefined();
+  });
+
+  test('reports the reset and reloads the listing when only the quota read after it fails', async () => {
+    const { clear, messages, notices, reloads, run } = setup({ readStatus: 503 });
+    await run();
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(reloads()).toBe(1);
+    expect(notices).toEqual(['warning']);
+    expect(messages).toEqual(['codex_quota.reset_success_refresh_failed']);
+    const quota = useQuotaStore.getState().codexQuota[getQuotaCacheKey(file)];
+    expect(quota?.status).toBe('error');
+    expect(quota?.errorStatus).toBe(503);
+  });
+
+  test('discards a failed read after the reset when the connection changed', async () => {
+    const { notices, reloads, run } = setup({ changeConnectionOnRead: true, readStatus: 503 });
+    await run();
     expect(reloads()).toBe(0);
     expect(notices).toEqual([]);
     expect(useQuotaStore.getState().codexQuota[getQuotaCacheKey(file)]).toBeUndefined();
