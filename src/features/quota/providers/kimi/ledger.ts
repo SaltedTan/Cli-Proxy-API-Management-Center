@@ -14,10 +14,11 @@ export function buildKimiLedger(quota: KimiQuotaState, t: TFunction): LedgerSnap
         label: row.labelKey
           ? t(row.labelKey, (row.labelParams ?? {}) as Record<string, string | number>)
           : (row.label ?? ''),
-        // Kimi reports raw counts; same derivation as KimiQuotaBody.
+        // Kimi reports raw counts; same derivation as KimiQuotaBody. Unrounded:
+        // 999 of 1000 used is not used up.
         remaining:
           row.limit > 0
-            ? clampPercent(Math.round(((row.limit - row.used) / row.limit) * 100))
+            ? clampPercent(((row.limit - row.used) / row.limit) * 100)
             : row.used > 0
               ? 0
               : null,

@@ -379,11 +379,13 @@ export function buildKimiQuotaRows(payload: KimiUsagePayload): KimiQuotaRow[] {
   const monthlyRatio = Number(monthly?.used_ratio);
   if (monthly && monthly.used_ratio !== undefined && Number.isFinite(monthlyRatio)) {
     const row = toKimiUsageRow(
-      { used: Math.round(monthlyRatio * 100), limit: 100, reset_time: monthly.reset_time },
+      { used: monthlyRatio * 100, limit: 100, reset_time: monthly.reset_time },
       { labelKey: 'kimi_quota.monthly_limit' }
     );
     if (row) {
-      rows.push({ id: 'monthly', ...row });
+      // Keep the ratio exact: rounding (or the integer parse above) would read a
+      // month 99.6% spent as fully spent.
+      rows.push({ id: 'monthly', ...row, used: monthlyRatio * 100 });
     }
   }
 

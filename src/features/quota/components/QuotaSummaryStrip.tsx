@@ -25,7 +25,12 @@ import {
   getTypeLabel,
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
-import type { ProviderModelSummary, ProviderSummary, ProviderSummaryLine } from '../ledgerModel';
+import {
+  formatPercent,
+  type ProviderModelSummary,
+  type ProviderSummary,
+  type ProviderSummaryLine,
+} from '../ledgerModel';
 import { approximateInstant } from '../laneModel';
 import type { PaceCounts } from '../paceModel';
 import type { QuotaProviderType } from '../providers/types';
@@ -114,7 +119,7 @@ function SummaryCell({
         {headline?.label ?? t('quota_management.summary_not_loaded')}
       </div>
       <div className={styles.figure}>
-        <span className={styles.total}>{total === null ? '--' : `${total}%`}</span>
+        <span className={styles.total}>{formatPercent(total)}</span>
         <span className={styles.capacity}>
           {t('quota_management.summary_of_capacity', { capacity })}
         </span>
@@ -124,7 +129,7 @@ function SummaryCell({
         className={styles.segments}
         role="img"
         aria-label={t('quota_management.summary_segments_label', {
-          total: total === null ? '--' : `${total}%`,
+          total: formatPercent(total),
           capacity: `${capacity}%`,
           count: segments.length,
         })}
@@ -217,7 +222,7 @@ function Segments({ line, label }: { line: ProviderSummaryLine; label: string })
 function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: string }) {
   const { t } = useTranslation();
   const { line } = model;
-  const total = line.totalRemaining === null ? '--' : `${line.totalRemaining}%`;
+  const total = formatPercent(line.totalRemaining);
   const servingClass =
     model.serving === model.carrying
       ? styles.markOpen
@@ -280,9 +285,7 @@ function SecondaryLine({ line }: { line: ProviderSummaryLine }) {
   return (
     <span className={styles.secondaryLine}>
       <span className={styles.secondaryLabel}>{line.label}</span>
-      <span className={styles.secondaryValue}>
-        {line.totalRemaining === null ? '--' : `${line.totalRemaining}%`}
-      </span>
+      <span className={styles.secondaryValue}>{formatPercent(line.totalRemaining)}</span>
     </span>
   );
 }

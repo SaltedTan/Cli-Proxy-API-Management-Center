@@ -45,6 +45,7 @@ import {
 } from '../laneModel';
 import {
   buildLedgerColumns,
+  formatPercent,
   type LedgerColumn,
   type LedgerSnapshot,
   type LedgerWindow,
@@ -408,9 +409,7 @@ function WindowCell({
         <span className={styles.cellLabel} title={window.label}>
           {window.label}
         </span>
-        <span className={styles.cellPercent}>
-          {window.remaining === null ? '--' : `${Math.round(window.remaining)}%`}
-        </span>
+        <span className={styles.cellPercent}>{formatPercent(window.remaining)}</span>
       </div>
       <div className={paceStyles.meter}>
         <QuotaMeter percent={window.remaining} classes={quotaClasses} index={index} />
@@ -530,9 +529,7 @@ function LaneCell({
           <span className={styles.statusMark} aria-hidden="true" />
           {t(`quota_management.lane_status_${lane.status}`)}
         </span>
-        <span className={styles.lanePercent}>
-          {gate.remaining === null ? '--' : `${Math.round(gate.remaining)}%`}
-        </span>
+        <span className={styles.lanePercent}>{formatPercent(gate.remaining)}</span>
       </div>
       <div className={styles.laneGate}>
         <span className={styles.laneGateLabel} title={gate.label}>
@@ -623,9 +620,7 @@ function LimitChips({ snapshot, lanes }: { snapshot: LedgerSnapshot; lanes: Quot
                 />
               )}
             </span>
-            <span className={styles.chipPercent}>
-              {window.remaining === null ? '--' : `${Math.round(window.remaining)}%`}
-            </span>
+            <span className={styles.chipPercent}>{formatPercent(window.remaining)}</span>
             <span className={styles.chipReset}>
               {window.resetAtMs === null
                 ? t('quota_management.no_reset_pending')

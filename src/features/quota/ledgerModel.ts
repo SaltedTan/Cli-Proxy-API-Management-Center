@@ -81,6 +81,18 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 export const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
+/**
+ * A percentage as shown: whole numbers, except that a sliver is never rounded
+ * into an empty or a full window. 0.4% left reads "<1", not "0" — which would
+ * say used up while requests still go through. Models keep the exact figure;
+ * only display rounds.
+ */
+export const displayPercent = (value: number): string =>
+  value > 0 && value < 1 ? '<1' : value > 99 && value < 100 ? '>99' : String(Math.round(value));
+
+export const formatPercent = (value: number | null): string =>
+  value === null ? '--' : `${displayPercent(value)}%`;
+
 /** Most providers report percent USED; the ledger reads percent remaining. */
 export const remainingFromUsed = (used: number | null | undefined): number | null =>
   isFiniteNumber(used) ? clampPercent(100 - used) : null;
@@ -147,7 +159,7 @@ export function buildLedgerColumns(snapshots: readonly (LedgerSnapshot | null)[]
 export interface ProviderSummaryLine {
   id: string;
   label: string;
-  /** Sum of remaining percent over credentials that report it; null when none do. */
+  /** Sum of remaining percent over credentials that report it, unrounded; null when none do. */
   totalRemaining: number | null;
   /**
    * 100 per credential that reports this window or is not loaded yet — the pool
@@ -252,7 +264,7 @@ export function summarizeProvider(
     return {
       id: column.id,
       label: column.label,
-      totalRemaining: total === null ? null : Math.round(total),
+      totalRemaining: total,
       capacity: segments.length * 100,
       segments,
       nextResetMs,

@@ -9,6 +9,7 @@ import type { XaiBillingSummary, XaiQuotaState } from '@/types';
 import { buildResetDisplay, formatQuotaResetTime, parseIsoToMs } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { formatPercent } from '../../ledgerModel';
 import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { XAI_WEEKLY_ROW_ID, collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
@@ -43,11 +44,6 @@ const formatXaiOnDemandAmount = (billing: XaiBillingSummary): string => {
   const cap = formatUsdFromCents(billing.onDemandCapCents);
   if (billing.onDemandCapCents === null) return remaining;
   return `${remaining} / ${cap}`;
-};
-
-const formatXaiPercent = (value: number | null): string => {
-  if (value === null) return '--';
-  return `${Math.round(value)}%`;
 };
 
 const planValueClass = (
@@ -99,7 +95,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
   const clampedUsed =
     billing.usedPercent === null ? null : Math.max(0, Math.min(100, billing.usedPercent));
   const remaining = clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
-  const percentLabel = formatXaiPercent(remaining);
+  const percentLabel = formatPercent(remaining);
   const amountLabel = formatXaiRemainingAmount(billing);
   const resetLabel = formatQuotaResetTime(billing.billingPeriodEnd);
   // The monthly row is a billing cycle, so it carries no resetAtMs (that field
@@ -118,7 +114,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
       : Math.max(0, Math.min(100, billing.onDemandUsedPercent));
   const onDemandRemaining =
     clampedOnDemandUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedOnDemandUsed));
-  const onDemandPercentLabel = formatXaiPercent(onDemandRemaining);
+  const onDemandPercentLabel = formatPercent(onDemandRemaining);
   const onDemandAmountLabel = formatXaiOnDemandAmount(billing);
   const plan = resolveXaiPlan(billing.monthlyLimitCents);
   const weeklyUsed =
@@ -195,7 +191,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
               <span className={classes.quotaPercent}>
                 {weeklyUsed === null
                   ? t('xai_quota.usage_unavailable')
-                  : t('xai_quota.used_percent', { percent: formatXaiPercent(weeklyUsed) })}
+                  : t('xai_quota.used_percent', { percent: formatPercent(weeklyUsed) })}
               </span>
               {weeklyResetDisplay && (
                 <QuotaResetLabel display={weeklyResetDisplay} classes={classes} soon={weeklySoon} />
@@ -224,7 +220,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
               <div className={classes.quotaMeta}>
                 <span className={classes.quotaPercent}>
                   {t('xai_quota.used_percent', {
-                    percent: formatXaiPercent(used),
+                    percent: formatPercent(used),
                   })}
                 </span>
               </div>

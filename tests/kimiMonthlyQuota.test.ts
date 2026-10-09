@@ -17,9 +17,10 @@ describe('Kimi monthly quota', () => {
     });
 
     expect(rows.map(({ id }) => id)).toEqual(['limit-0', 'monthly']);
+    // The ratio stays exact: rounding would read a month 99.6% spent as fully spent.
+    expect(rows[1].used).toBeCloseTo(25.29, 10);
     expect(rows[1]).toMatchObject({
       labelKey: 'kimi_quota.monthly_limit',
-      used: 25,
       limit: 100,
       resetAtMs: Date.parse('2099-10-22T00:00:00Z'),
       periodHours: 720,

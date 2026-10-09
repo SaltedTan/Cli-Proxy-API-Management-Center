@@ -13,7 +13,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNow } from '@/hooks/useNow';
 import { formatRelativeInstant } from '@/utils/quota';
-import type { LedgerSnapshot, LedgerWindow } from '../ledgerModel';
+import { displayPercent, type LedgerSnapshot, type LedgerWindow } from '../ledgerModel';
 import { computeWindowPace, type KnownPace } from '../paceModel';
 import type { PaceClassMap } from '../types';
 
@@ -112,7 +112,7 @@ export function PaceVerdict({
         })
       : t(`quota_management.pace_${pace.status}`);
   const detail = t('quota_management.pace_detail', {
-    used: Math.round(100 - remaining),
+    used: displayPercent(100 - remaining),
     elapsed: Math.round(pace.elapsedPercent),
   });
   const statusClass = usedUp

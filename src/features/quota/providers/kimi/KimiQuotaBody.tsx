@@ -8,6 +8,7 @@ import type { KimiQuotaState } from '@/types';
 import { buildResetDisplay, formatKimiResetHint } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { clampPercent, formatPercent } from '../../ledgerModel';
 import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
@@ -33,12 +34,8 @@ export function KimiQuotaBody({ quota, classes }: QuotaBodyProps<KimiQuotaState>
         const limit = row.limit;
         const used = row.used;
         const remaining =
-          limit > 0
-            ? Math.max(0, Math.min(100, Math.round(((limit - used) / limit) * 100)))
-            : used > 0
-              ? 0
-              : null;
-        const percentLabel = remaining === null ? '--' : `${remaining}%`;
+          limit > 0 ? clampPercent(((limit - used) / limit) * 100) : used > 0 ? 0 : null;
+        const percentLabel = formatPercent(remaining);
         const rowLabel = row.labelKey
           ? t(row.labelKey, (row.labelParams ?? {}) as Record<string, string | number>)
           : (row.label ?? '');

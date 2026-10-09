@@ -37,8 +37,8 @@ export function buildAntigravityLedger(quota: AntigravityQuotaState, t: TFunctio
         return {
           id: antigravityWindowId(group.id, bucket.id),
           label: prefixed ? `${groupLabel} · ${bucketLabel}` : bucketLabel,
-          // Antigravity reports the fraction REMAINING.
-          remaining: clampPercent(Math.round(bucket.remainingFraction * 100)),
+          // Antigravity reports the fraction REMAINING. Unrounded: 0.004 is not used up.
+          remaining: clampPercent(bucket.remainingFraction * 100),
           resetAtMs: usableMs(bucket.resetAtMs),
           resetLabel: null,
           periodHours: bucket.periodHours ?? null,

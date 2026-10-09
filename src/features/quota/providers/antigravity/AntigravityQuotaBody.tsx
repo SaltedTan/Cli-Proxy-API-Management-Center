@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { AntigravityQuotaState } from '@/types';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { displayPercent } from '../../ledgerModel';
 import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
 import type { QuotaBodyProps } from '../../types';
@@ -145,7 +146,7 @@ export function AntigravityQuotaBody({ quota, classes }: QuotaBodyProps<Antigrav
                   bucket.remainingFraction === 1
                     ? t('antigravity_quota.quota_available')
                     : t('antigravity_quota.remaining_percent', {
-                        percent: Math.round(percent),
+                        percent: displayPercent(percent),
                       });
                 const resetLabel = formatAntigravityResetLabel(bucket.resetTime, t, nowMs);
                 const bucketLabel = translateAntigravityQuotaLabel(

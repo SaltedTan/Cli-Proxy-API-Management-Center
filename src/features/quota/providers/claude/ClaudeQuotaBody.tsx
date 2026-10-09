@@ -8,6 +8,7 @@ import type { ClaudeQuotaState } from '@/types';
 import { buildResetDisplay } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { formatPercent } from '../../ledgerModel';
 import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
@@ -48,7 +49,7 @@ export function ClaudeQuotaBody({ quota, classes }: QuotaBodyProps<ClaudeQuotaSt
           const clampedUsed = used === null ? null : Math.max(0, Math.min(100, used));
           const remaining =
             clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
-          const percentLabel = remaining === null ? '--' : `${Math.round(remaining)}%`;
+          const percentLabel = formatPercent(remaining);
           const windowLabel = window.labelKey
             ? t(window.labelKey, window.labelParams)
             : window.label;

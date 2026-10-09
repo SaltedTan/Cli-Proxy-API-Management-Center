@@ -17,6 +17,7 @@ import { resolveTimeZoneLabel } from '@/utils/time/timezone';
 import { formatDateTimeValue } from '@/utils/format';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
+import { formatPercent } from '../../ledgerModel';
 import { PacedMeter, QuotaRowPace } from '../../components/QuotaPace';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId, resetCreditRowId } from '../../resetSchedule';
@@ -163,7 +164,7 @@ export function CodexQuotaBody({ quota, classes }: QuotaBodyProps<CodexQuotaStat
           const clampedUsed = used === null ? null : Math.max(0, Math.min(100, used));
           const remaining =
             clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
-          const percentLabel = remaining === null ? '--' : `${Math.round(remaining)}%`;
+          const percentLabel = formatPercent(remaining);
           const windowLabel = window.labelKey
             ? t(window.labelKey, window.labelParams as Record<string, string | number>)
             : window.label;
