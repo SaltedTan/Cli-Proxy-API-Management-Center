@@ -40,6 +40,18 @@ export interface AuthFileCooldownSnapshot {
   records: AuthFileCooldown[] | null;
 }
 
+/** Last failed OAuth token refresh; the backend clears it after a successful refresh. */
+export interface AuthFileRefreshError {
+  /** Sanitized backend diagnostic; plain text, never markup. */
+  message: string;
+  code?: string;
+  httpStatus?: number;
+  /** When the refresh failed (ISO timestamp). */
+  failedAt?: string;
+  /** When the backend next attempts a refresh (ISO timestamp). */
+  nextRefreshAfter?: string;
+}
+
 export interface AuthFileItem {
   name: string;
   type?: AuthFileType | string;
@@ -76,6 +88,8 @@ export interface AuthFileItem {
   recentRequests?: RecentRequestBucket[];
   /** Absent on older servers. Never interpreted as credential health. */
   cooldownSnapshot?: AuthFileCooldownSnapshot;
+  /** Absent when the last refresh succeeded or the server does not report it. */
+  refreshError?: AuthFileRefreshError;
   [key: string]: unknown;
 }
 

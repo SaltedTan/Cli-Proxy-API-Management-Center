@@ -16,6 +16,7 @@ import {
 } from '@/utils/recentRequests';
 import { parseTimestampMs } from '@/utils/timestamp';
 import { normalizeAuthFileCooldowns, normalizeCooldownTimestamp } from './authFileCooldowns';
+import { normalizeAuthFileRefreshError } from './authFileRefreshError';
 
 type AuthFileStatusResponse = { status: string; disabled: boolean };
 export type AuthFileLookup = { name: string; authIndex?: string };
@@ -271,6 +272,10 @@ const normalizeAuthFileEntry = (
   const modified = readDateField(entry);
   const priority = readIntegerField(entry['priority']);
   const weight = readIntegerField(entry['weight']);
+  const refreshError = normalizeAuthFileRefreshError(
+    entry['refresh_error'],
+    entry['next_refresh_after']
+  );
 
   return {
     ...entry,
@@ -288,6 +293,7 @@ const normalizeAuthFileEntry = (
     ...(email ? { email } : {}),
     ...(projectId ? { projectId } : {}),
     ...(organizationName ? { organizationName } : {}),
+    ...(refreshError ? { refreshError } : {}),
   };
 };
 

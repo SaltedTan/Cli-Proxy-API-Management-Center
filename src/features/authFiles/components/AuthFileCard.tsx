@@ -34,6 +34,7 @@ import { resolveAuthFileQuotaType } from '@/features/authFiles/logic';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
 import { AuthFileCooldownSection } from './AuthFileCooldownSection';
+import { AuthFileRefreshFailure } from './AuthFileRefreshFailure';
 import styles from './AuthFileCard.module.scss';
 
 export type AuthFileCardProps = {
@@ -183,6 +184,8 @@ export function AuthFileCard(props: AuthFileCardProps) {
           <span>{rawStatusMessage}</span>
         </div>
       )}
+
+      <AuthFileRefreshFailure file={file} />
 
       <AuthFileCooldownSection
         snapshot={file.cooldownSnapshot}
