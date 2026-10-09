@@ -30,6 +30,12 @@ interface AuthStoreState extends AuthState {
 
 let restoreSessionPromise: Promise<boolean> | null = null;
 
+/** Standalone entries from the pre-React panel; the persisted auth store supersedes them. */
+const LEGACY_AUTH_STORAGE_KEYS = ['apiBase', 'apiUrl', 'managementKey'];
+const clearLegacyAuthStorage = () => {
+  LEGACY_AUTH_STORAGE_KEYS.forEach((key) => obfuscatedStorage.removeItem(key));
+};
+
 export const useAuthStore = create<AuthStoreState>()(
   persist(
     (set, get) => ({
@@ -48,13 +54,16 @@ export const useAuthStore = create<AuthStoreState>()(
         if (restoreSessionPromise) return restoreSessionPromise;
 
         restoreSessionPromise = (async () => {
-          obfuscatedStorage.migratePlaintextKeys(['apiBase', 'apiUrl', 'managementKey']);
+          obfuscatedStorage.migratePlaintextKeys(LEGACY_AUTH_STORAGE_KEYS);
 
           const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
           const legacyBase =
             obfuscatedStorage.getItem<string>('apiBase') ||
             obfuscatedStorage.getItem<string>('apiUrl', { encrypt: true });
-          const legacyKey = obfuscatedStorage.getItem<string>('managementKey');
+          // The legacy panel had no remember option and deleted its key on logout. Adopt the key
+          // only for a session that is still logged in, and drop the legacy entries either way.
+          const legacyKey = wasLoggedIn ? obfuscatedStorage.getItem<string>('managementKey') : null;
+          clearLegacyAuthStorage();
 
           const { apiBase, managementKey, rememberPassword } = get();
           const resolvedBase = normalizeApiBase(
@@ -141,6 +150,7 @@ export const useAuthStore = create<AuthStoreState>()(
             rememberPassword,
             connectionStatus: 'connected',
           });
+          clearLegacyAuthStorage();
           if (rememberPassword) {
             localStorage.setItem('isLoggedIn', 'true');
           } else {
@@ -171,6 +181,7 @@ export const useAuthStore = create<AuthStoreState>()(
           connectionStatus: 'disconnected',
         });
         localStorage.removeItem('isLoggedIn');
+        clearLegacyAuthStorage();
       },
 
       // 检查认证状态

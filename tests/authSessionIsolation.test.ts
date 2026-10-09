@@ -142,3 +142,50 @@ describe('auth session isolation', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
   });
 });
+
+describe('legacy management key storage', () => {
+  const writeLegacyKey = () => obfuscatedStorage.setItem('managementKey', 'fixture-legacy-key');
+
+  test('a non-remembered login and logout delete the legacy key', async () => {
+    writeLegacyKey();
+    const login = useAuthStore.getState().login(connectionB);
+    pendingConfigReads[0].resolve({} as Config);
+    await login;
+    expect(memory.has('managementKey')).toBe(false);
+
+    writeLegacyKey();
+    useAuthStore.getState().logout();
+    expect(memory.has('managementKey')).toBe(false);
+  });
+
+  test('restoreSession drops a legacy key without a logged-in legacy session', async () => {
+    writeLegacyKey();
+    obfuscatedStorage.setItem('apiBase', 'https://legacy.invalid');
+
+    expect(await useAuthStore.getState().restoreSession()).toBe(false);
+    const state = useAuthStore.getState();
+    expect(state.managementKey).toBe('');
+    expect(state.rememberPassword).toBe(false);
+    expect(state.apiBase).toBe('https://legacy.invalid');
+    expect(memory.has('managementKey')).toBe(false);
+    expect(memory.has('apiBase')).toBe(false);
+    expect(persistedAuth().managementKey).toBeUndefined();
+  });
+
+  test('restoreSession migrates the key of a logged-in legacy session once', async () => {
+    writeLegacyKey();
+    obfuscatedStorage.setItem('apiBase', 'https://legacy.invalid');
+    memory.set('isLoggedIn', 'true');
+
+    const restored = useAuthStore.getState().restoreSession();
+    expect(memory.has('managementKey')).toBe(false);
+    pendingConfigReads[0].resolve({} as Config);
+    expect(await restored).toBe(true);
+
+    const state = useAuthStore.getState();
+    expect(state.isAuthenticated).toBe(true);
+    expect(state.managementKey).toBe('fixture-legacy-key');
+    expect(state.rememberPassword).toBe(true);
+    expect(persistedAuth().managementKey).toBe('fixture-legacy-key');
+  });
+});
