@@ -39,14 +39,22 @@ export interface PolledSnapshot<T> {
   subscribe(listener: () => void): () => void;
   getSnapshot(): PolledSnapshotState<T>;
   /**
-   * Loads the snapshot now. Resolves false when the load failed or was discarded, so
-   * callers that changed something can tell whether the view shows the change.
+   * Loads the snapshot. A read already in flight may predate a change the caller just
+   * made, so this one starts after it; concurrent refreshes share that read. Resolves
+   * false when the load failed or was discarded, so callers that changed something can
+   * tell whether the view shows the change.
    */
   refresh(): Promise<boolean>;
+  /** A scheduled load: joins the read in flight or queued, else starts one. */
+  poll(): Promise<boolean>;
   /** Back to idle for another connection; results of reads in flight are discarded. */
   reset(): void;
 }
 
+/**
+ * Reads are serialized: at most one is in flight and at most one waits behind it, so
+ * polls and manual refreshes never overlap and responses cannot arrive out of order.
+ */
 export function createPolledSnapshot<T>({
   read,
   isUnsupported = () => false,
@@ -54,7 +62,10 @@ export function createPolledSnapshot<T>({
   now = Date.now,
 }: PolledSnapshotOptions<T>): PolledSnapshot<T> {
   let state: PolledSnapshotState<T> = IDLE_SNAPSHOT_STATE;
-  let requestId = 0;
+  // Bumped by `reset`; reads and queued refreshes of an earlier epoch are discarded.
+  let epoch = 0;
+  let inFlight: Promise<boolean> | null = null;
+  let queued: Promise<boolean> | null = null;
   const listeners = new Set<() => void>();
 
   const set = (next: PolledSnapshotState<T>) => {
@@ -63,10 +74,10 @@ export function createPolledSnapshot<T>({
     listeners.forEach((listener) => listener());
   };
 
-  const refresh = async (): Promise<boolean> => {
-    const id = ++requestId;
+  const load = async (): Promise<boolean> => {
+    const started = epoch;
     const revision = connectionRevision();
-    const isCurrent = () => id === requestId && revision === connectionRevision();
+    const isCurrent = () => started === epoch && revision === connectionRevision();
 
     if (!state.data) set(LOADING_STATE);
     try {
@@ -87,6 +98,14 @@ export function createPolledSnapshot<T>({
     }
   };
 
+  const start = (): Promise<boolean> => {
+    const promise: Promise<boolean> = load().finally(() => {
+      if (inFlight === promise) inFlight = null;
+    });
+    inFlight = promise;
+    return promise;
+  };
+
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -95,9 +114,26 @@ export function createPolledSnapshot<T>({
       };
     },
     getSnapshot: () => state,
-    refresh,
+    refresh() {
+      if (!inFlight) return start();
+      if (!queued) {
+        const queuedEpoch = epoch;
+        const next = () => {
+          if (queuedEpoch !== epoch) return false;
+          queued = null;
+          return start();
+        };
+        queued = inFlight.then(next, next);
+      }
+      return queued;
+    },
+    poll() {
+      return queued ?? inFlight ?? start();
+    },
     reset() {
-      requestId += 1;
+      epoch += 1;
+      inFlight = null;
+      queued = null;
       set(IDLE_SNAPSHOT_STATE);
     },
   };

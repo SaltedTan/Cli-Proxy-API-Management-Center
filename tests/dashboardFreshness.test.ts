@@ -19,6 +19,7 @@ import { RoutingPanel } from '@/features/dashboard/components/RoutingPanel';
 import type { ClientUsageState } from '@/features/dashboard/hooks/useClientUsage';
 import type { RoutingObservabilityState } from '@/features/dashboard/hooks/useRoutingObservability';
 import { createPolledSnapshot, unrefreshedChangeNotice } from '@/features/dashboard/polledSnapshot';
+import { startVisiblePolling } from '@/features/dashboard/visiblePolling';
 import { normalizeClientUsage } from '@/services/api/clientUsage';
 import { normalizeRoutingObservability } from '@/services/api/routing';
 
@@ -165,14 +166,18 @@ describe('polled snapshot state', () => {
 });
 
 describe('dashboard credential data', () => {
-  test('an older response that arrives last does not overwrite a newer one', async () => {
+  test('a newer refresh waits for the older read, so responses arrive in order', async () => {
     const { resource, reads } = harness();
     const older = resource.refresh();
     const newer = resource.refresh();
+    // The second read starts only once the first has settled.
+    expect(reads).toHaveLength(1);
+    reads[0].resolve('older');
+    expect(await older).toBe(true);
+    await Promise.resolve();
+    expect(reads).toHaveLength(2);
     reads[1].resolve('newer');
     expect(await newer).toBe(true);
-    reads[0].resolve('older');
-    expect(await older).toBe(false);
     expect(resource.getSnapshot().data).toBe('newer');
   });
 
@@ -193,6 +198,144 @@ describe('dashboard credential data', () => {
     // No unguarded state write is left behind.
     expect(source).not.toContain('setAuthFiles');
     expect(source.match(/authFilesApi\.list\(/g)).toHaveLength(1);
+  });
+});
+
+describe('overlapping reads', () => {
+  /** Lets queued promise callbacks run; no timers involved. */
+  const flush = async () => {
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  };
+
+  test('a poll joins the read in flight instead of starting another', async () => {
+    const { resource, reads } = harness();
+    const manual = resource.refresh();
+    const polled = resource.poll();
+    expect(reads).toHaveLength(1);
+    reads[0].resolve('only');
+    expect(await polled).toBe(true);
+    expect(await manual).toBe(true);
+    expect(reads).toHaveLength(1);
+  });
+
+  test('refreshes during a read share one follow-up read, and polls join it', async () => {
+    const { resource, reads } = harness();
+    const first = resource.poll();
+    const a = resource.refresh();
+    const b = resource.refresh();
+    const polled = resource.poll();
+    expect(a).toBe(b);
+    expect(polled).toBe(a);
+    reads[0].resolve('before the change');
+    await first;
+    await flush();
+    expect(reads).toHaveLength(2);
+    reads[1].resolve('after the change');
+    expect(await a).toBe(true);
+    expect(resource.getSnapshot().data).toBe('after the change');
+    expect(reads).toHaveLength(2);
+  });
+
+  test('a refresh after the read settled starts a new one at once', async () => {
+    const { resource, reads } = harness();
+    const first = resource.refresh();
+    reads[0].resolve('first');
+    await first;
+    void resource.refresh();
+    expect(reads).toHaveLength(2);
+  });
+
+  test('a scope reset drops the queued follow-up read', async () => {
+    const { resource, reads } = harness();
+    void resource.refresh();
+    const queued = resource.refresh();
+    resource.reset();
+    reads[0].resolve('old scope');
+    expect(await queued).toBe(false);
+    await flush();
+    expect(reads).toHaveLength(1);
+    expect(resource.getSnapshot()).toEqual({ status: 'idle', data: null });
+    // The new scope reads at once, without waiting for the old one.
+    void resource.refresh();
+    expect(reads).toHaveLength(2);
+  });
+});
+
+describe('polling while the tab is hidden', () => {
+  function pollingHarness() {
+    let tick: (() => void) | null = null;
+    let visibilityListener: (() => void) | null = null;
+    let hidden = false;
+    let polls = 0;
+    let cleared = 0;
+    const stop = startVisiblePolling({
+      intervalMs: 30_000,
+      poll: () => {
+        polls += 1;
+      },
+      isHidden: () => hidden,
+      onVisibilityChange: (listener) => {
+        visibilityListener = listener;
+        return () => {
+          visibilityListener = null;
+        };
+      },
+      setTimer: (fn, ms) => {
+        expect(ms).toBe(30_000);
+        tick = fn;
+        return 7;
+      },
+      clearTimer: (id) => {
+        expect(id).toBe(7);
+        cleared += 1;
+      },
+    });
+    return {
+      stop,
+      tick: () => tick?.(),
+      setHidden: (value: boolean) => {
+        hidden = value;
+        visibilityListener?.();
+      },
+      polls: () => polls,
+      cleared: () => cleared,
+      listening: () => visibilityListener !== null,
+    };
+  }
+
+  test('polls on each tick while visible', () => {
+    const polling = pollingHarness();
+    polling.tick();
+    polling.tick();
+    expect(polling.polls()).toBe(2);
+  });
+
+  test('skips ticks while hidden and polls once when visible again', () => {
+    const polling = pollingHarness();
+    polling.setHidden(true);
+    polling.tick();
+    polling.tick();
+    expect(polling.polls()).toBe(0);
+    polling.setHidden(false);
+    expect(polling.polls()).toBe(1);
+    // Only the skipped ticks are made up for, once.
+    polling.setHidden(true);
+    polling.setHidden(false);
+    expect(polling.polls()).toBe(1);
+  });
+
+  test('a brief hide between ticks does not poll early', () => {
+    const polling = pollingHarness();
+    polling.setHidden(true);
+    polling.setHidden(false);
+    expect(polling.polls()).toBe(0);
+  });
+
+  test('stopping clears the timer and the visibility listener', () => {
+    const polling = pollingHarness();
+    polling.stop();
+    expect(polling.cleared()).toBe(1);
+    expect(polling.listening()).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { useInterval } from '@/hooks/useInterval';
 import { apiClient } from '@/services/api/client';
 import { createPolledSnapshot, type PolledSnapshotState } from '../polledSnapshot';
+import { startVisiblePolling } from '../visiblePolling';
 
 export interface PolledSnapshotHookOptions<T> {
   enabled: boolean;
@@ -16,7 +16,8 @@ export interface PolledSnapshotHookOptions<T> {
 
 /**
  * Loads a snapshot while `enabled` and polls it every `intervalMs` until the backend
- * reports it unsupported. `refresh` resolves whether the load succeeded.
+ * reports it unsupported, skipping ticks while the tab is hidden. Polls join a read in
+ * flight; `refresh` reads after it and resolves whether the load succeeded.
  */
 export function usePolledSnapshot<T>({
   enabled,
@@ -52,12 +53,16 @@ export function usePolledSnapshot<T>({
     [resource, enabled]
   );
 
-  useInterval(
-    () => {
-      void refresh();
-    },
-    enabled && state.status !== 'unsupported' ? intervalMs : null
-  );
+  const polling = enabled && state.status !== 'unsupported';
+  useEffect(() => {
+    if (!polling) return;
+    return startVisiblePolling({
+      intervalMs,
+      poll: () => {
+        void resource.poll();
+      },
+    });
+  }, [resource, polling, intervalMs]);
 
   return { state, refresh };
 }
