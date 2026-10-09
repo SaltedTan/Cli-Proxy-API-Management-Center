@@ -598,7 +598,16 @@ export const authFilesApi = {
 
   deleteFile: (name: string) => authFilesApi.deleteFiles([name]),
 
-  deleteAll: () => apiClient.delete('/credentials', { params: { all: true } }),
+  /** Returns how many files the backend removed; it skips files it fails to remove. */
+  deleteAll: async (): Promise<{ deleted?: number }> => {
+    const payload = await apiClient.delete<{ deleted?: unknown }>('/credentials', {
+      params: { all: true },
+    });
+    const deleted = isRecord(payload) ? payload.deleted : undefined;
+    return typeof deleted === 'number' && Number.isSafeInteger(deleted) && deleted >= 0
+      ? { deleted }
+      : {};
+  },
 
   download: async (name: string): Promise<Blob> => {
     try {

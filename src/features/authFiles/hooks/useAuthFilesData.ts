@@ -4,6 +4,7 @@ import { apiClient, authFilesApi } from '@/services/api';
 import type { AuthFileRefreshResult } from '@/services/api/authFiles';
 import { getAuthFileRefreshKey } from '@/features/authFiles/manualRefresh';
 import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
+import { summarizeDeleteAll } from '@/features/authFiles/deleteAll';
 import { useNotificationStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import { formatFileSize } from '@/utils/format';
@@ -205,8 +206,9 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
     });
   }, [files, selectedFiles.size]);
 
-  const loadFiles = useCallback(
-    async (options?: LoadFilesOptions) => {
+  /** Resolves to the loaded files, or null when the load failed or was superseded. */
+  const fetchFiles = useCallback(
+    async (options?: LoadFilesOptions): Promise<AuthFileItem[] | null> => {
       const background = options?.background === true;
       const requestId = ++loadRequestIdRef.current;
       const connectionRevision = apiClient.getConnectionRevision();
@@ -223,13 +225,16 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
 
       try {
         const data = await authFilesApi.list();
-        if (!isCurrentRequest()) return; // 已被更新的请求/连接/变更取代
-        setFiles(data?.files || []);
+        if (!isCurrentRequest()) return null; // 已被更新的请求/连接/变更取代
+        const nextFiles = data?.files || [];
+        setFiles(nextFiles);
         setError('');
+        return nextFiles;
       } catch (err: unknown) {
-        if (!isCurrentRequest()) return;
+        if (!isCurrentRequest()) return null;
         const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');
         setError(errorMessage);
+        return null;
       } finally {
         if (isCurrentRequest()) {
           setLoading(false);
@@ -238,6 +243,13 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
       }
     },
     [t]
+  );
+
+  const loadFiles = useCallback(
+    async (options?: LoadFilesOptions) => {
+      await fetchFiles(options);
+    },
+    [fetchFiles]
   );
 
   const handleUploadClick = useCallback(() => {
@@ -382,13 +394,28 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
           setDeletingAll(true);
           try {
             if (!isFiltered && !isProblemOnly && !isDisabledOnly && !isEnabledOnly) {
-              await authFilesApi.deleteAll();
-              showNotification(t('auth_files.delete_all_success'), 'success');
+              const { deleted } = await authFilesApi.deleteAll();
               invalidateInFlightLoads();
               onFilesMutatedRef.current?.();
-              setFiles((prev) => prev.filter((file) => isRuntimeOnlyAuthFile(file)));
               deselectAll();
               notifyAuthFilesChanged();
+              // Reconcile from the server: it skips files it fails to remove.
+              const outcome = summarizeDeleteAll(
+                files,
+                deleted,
+                await fetchFiles({ background: true })
+              );
+              if (outcome.kind === 'success') {
+                showNotification(t('auth_files.delete_all_success'), 'success');
+              } else {
+                showNotification(
+                  t('auth_files.delete_all_partial', {
+                    deleted: outcome.deleted,
+                    expected: outcome.expected,
+                  }),
+                  'warning'
+                );
+              }
             } else {
               const filesToDelete = files.filter((file) => {
                 if (isRuntimeOnlyAuthFile(file)) return false;
@@ -494,6 +521,7 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
       applyDeletedFiles,
       deselectAll,
       files,
+      fetchFiles,
       invalidateInFlightLoads,
       showConfirmation,
       showNotification,

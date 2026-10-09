@@ -448,6 +448,7 @@
     "download_success": "檔案下載成功",
     "delete_success": "檔案刪除成功",
     "delete_all_success": "成功刪除",
+    "delete_all_partial": "已刪除 {{expected}} 個認證檔案中的 {{deleted}} 個。伺服器未能刪除其餘檔案，清單顯示剩餘的檔案。",
     "delete_filtered_success": "成功刪除 {{count}} 個 {{type}} 驗證檔案",
     "delete_filtered_partial": "{{type}} 驗證檔案刪除完成，成功 {{success}} 個，失敗 {{failed}} 個",
     "delete_filtered_none": "目前篩選類型（{{type}}）下沒有可刪除的驗證檔案",
