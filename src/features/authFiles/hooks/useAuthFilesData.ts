@@ -407,6 +407,13 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
               );
               if (outcome.kind === 'success') {
                 showNotification(t('auth_files.delete_all_success'), 'success');
+              } else if (outcome.kind === 'unverified') {
+                showNotification(
+                  outcome.deleted === null
+                    ? t('auth_files.delete_all_unverified_unknown')
+                    : t('auth_files.delete_all_unverified', { count: outcome.deleted }),
+                  'warning'
+                );
               } else {
                 showNotification(
                   t('auth_files.delete_all_partial', {

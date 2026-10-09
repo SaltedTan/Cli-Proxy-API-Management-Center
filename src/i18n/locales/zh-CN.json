@@ -456,6 +456,8 @@
     "delete_success": "文件删除成功",
     "delete_all_success": "成功删除",
     "delete_all_partial": "已删除 {{expected}} 个认证文件中的 {{deleted}} 个。服务器未能删除其余文件，列表显示剩余的文件。",
+    "delete_all_unverified": "已删除 {{count}} 个文件，但无法重新加载列表以确认剩余的文件。",
+    "delete_all_unverified_unknown": "已删除文件，但无法重新加载列表以确认剩余的文件。",
     "delete_filtered_success": "成功删除 {{count}} 个 {{type}} 认证文件",
     "delete_filtered_partial": "{{type}} 认证文件删除完成，成功 {{success}} 个，失败 {{failed}} 个",
     "delete_filtered_none": "当前筛选类型 ({{type}}) 下没有可删除的认证文件",
