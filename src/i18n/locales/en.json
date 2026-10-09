@@ -1534,6 +1534,7 @@
           "strategy_quota_aware": "Quota Aware",
           "strategy_quota_aware_hint": "Sends new work to the subscription most at risk of leaving weekly quota unused, and avoids credentials close to their 5h limit",
           "session_affinity_ttl": "Session Affinity TTL",
+          "session_affinity_ttl_hint": "Duration such as 30m, 1h30m or 90s; leave blank for the 1h default",
           "force_model_prefix": "Force Model Prefix",
           "force_model_prefix_desc": "Unprefixed model requests only use credentials without prefix",
           "passthrough_headers": "Pass Through Upstream Headers",

@@ -1558,6 +1558,7 @@
           "strategy_quota_aware": "額度感知（Quota Aware）",
           "strategy_quota_aware_hint": "將新請求優先分配給每週額度最可能用不完的訂閱，並避開接近 5 小時限額的憑證",
           "session_affinity_ttl": "會話黏性 TTL",
+          "session_affinity_ttl_hint": "時長，例如 30m、1h30m 或 90s；留空則使用預設的 1h",
           "force_model_prefix": "強制模型前綴",
           "force_model_prefix_desc": "未帶前綴的模型請求只使用無前綴憑證",
           "passthrough_headers": "透傳上游回應 Header",

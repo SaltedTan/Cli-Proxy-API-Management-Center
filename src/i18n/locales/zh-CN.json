@@ -1532,6 +1532,7 @@
           "strategy_quota_aware": "额度感知 (Quota Aware)",
           "strategy_quota_aware_hint": "将新请求优先分配给每周额度最可能用不完的订阅，并避开接近 5 小时限额的凭据",
           "session_affinity_ttl": "会话粘性 TTL",
+          "session_affinity_ttl_hint": "时长，例如 30m、1h30m 或 90s；留空则使用默认的 1h",
           "force_model_prefix": "强制模型前缀",
           "force_model_prefix_desc": "未带前缀的模型请求只使用无前缀凭据",
           "passthrough_headers": "透传上游响应 Header",

@@ -204,6 +204,8 @@ export function SectionNetwork({
               value={values.routingSessionAffinityTTL}
               onChange={(e) => onChange({ routingSessionAffinityTTL: e.target.value })}
               disabled={disabled}
+              hint={t('config_management.visual.sections.network.session_affinity_ttl_hint')}
+              error={getValidationMessage(t, validationErrors?.routingSessionAffinityTTL)}
             />
           </FieldAnchor>
         </FieldGrid>

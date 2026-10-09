@@ -79,6 +79,7 @@ export const SECTION_VALIDATION_FIELDS: Record<VisualSectionId, readonly VisualC
       'authAutoRefreshWorkers',
       'transientErrorCooldownSeconds',
       'videoResultAuthCacheTTL',
+      'routingSessionAffinityTTL',
     ],
     logging: ['errorLogsMaxFiles', 'logsMaxTotalSizeMb', 'redisUsageQueueRetentionSeconds'],
     quota: [],

@@ -33,7 +33,10 @@ import {
   writeVisualServer,
   validateVisualServer,
 } from '@/features/config/visualConfigServer';
-import { parseVisualRoutingStrategy } from '@/features/config/routingConfig';
+import {
+  parseVisualRoutingStrategy,
+  sessionAffinityTTLError,
+} from '@/features/config/routingConfig';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -199,6 +202,10 @@ export function getVisualConfigValidationErrors(
     maxRetryCredentials: getIntegerError(values.maxRetryCredentials),
     maxRetryInterval: getIntegerError(values.maxRetryInterval),
     authAutoRefreshWorkers: getIntegerError(values.authAutoRefreshWorkers),
+    routingSessionAffinityTTL: sessionAffinityTTLError(
+      values.routingSessionAffinityTTL,
+      dirtyFields
+    ),
     'streaming.keepaliveSeconds': getIntegerError(values.streaming.keepaliveSeconds),
     'streaming.bootstrapRetries': getIntegerError(values.streaming.bootstrapRetries),
     'streaming.nonstreamKeepaliveInterval': getIntegerError(
