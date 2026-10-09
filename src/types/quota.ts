@@ -219,10 +219,11 @@ export interface AntigravityQuotaBucket {
    * Reset instant in epoch ms, parsed from `resetTime`. Kept alongside the raw
    * string so the timeline can position a bar without re-parsing.
    *
-   * Not corrected by `serverTimeOffsetMs`: that offset is applied to *now* when
-   * rendering the card countdown, and every other provider's `resetAtMs` is an
-   * uncorrected instant too. Keeping them consistent matters more than the few
-   * seconds of clock skew it represents.
+   * Not corrected by `serverTimeOffsetMs`: the card countdown applies that
+   * offset to *now*, and the ledger moves this instant onto the browser clock
+   * (providers/antigravity/ledger.ts) so its pace and summary agree with the
+   * card. The timeline and recovery sort read it as is, like every other
+   * provider's uncorrected `resetAtMs`.
    */
   resetAtMs?: number | null;
   /** Window length in hours, from the bucket's `window` field. */
