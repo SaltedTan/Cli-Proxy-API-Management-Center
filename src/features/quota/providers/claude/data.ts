@@ -19,6 +19,7 @@ import {
   CLAUDE_PROFILE_URL,
   CLAUDE_USAGE_URL,
   CLAUDE_REQUEST_HEADERS,
+  CLAUDE_CLOUD_SESSION_CREDITS_ID,
   CLAUDE_USAGE_WINDOW_KEYS,
   claudePeriodHours,
   normalizeNumberValue,
@@ -105,7 +106,7 @@ export const buildClaudeQuotaWindows = (
     // them out of the account-wide windows that gate lanes.
     if (key === 'iguana_necktie' && isDollarDenominatedWindow(typedWindow)) {
       windows.push({
-        id: 'cloud-session-credits',
+        id: CLAUDE_CLOUD_SESSION_CREDITS_ID,
         label: t('claude_quota.cloud_session_credits'),
         labelKey: 'claude_quota.cloud_session_credits',
         scope: 'scoped',

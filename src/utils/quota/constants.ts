@@ -164,6 +164,14 @@ export const CLAUDE_USAGE_WINDOW_KEYS: readonly {
   },
 ];
 
+/**
+ * Window id of Claude's dollar-denominated cloud session credits. They are a
+ * prepaid balance rather than a rate limit: running out closes no API lane and
+ * their reset reopens none, so recovery, headline and timeline logic skip them
+ * while the card still shows them.
+ */
+export const CLAUDE_CLOUD_SESSION_CREDITS_ID = 'cloud-session-credits';
+
 // Codex API configuration
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 export const CODEX_SUBSCRIPTION_URL = 'https://chatgpt.com/backend-api/subscriptions';

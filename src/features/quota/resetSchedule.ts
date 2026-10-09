@@ -18,7 +18,7 @@
  * tests fighting each other.
  */
 
-import { parseIsoToMs } from '@/utils/quota';
+import { CLAUDE_CLOUD_SESSION_CREDITS_ID, parseIsoToMs } from '@/utils/quota';
 import { HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 
@@ -81,7 +81,8 @@ const collectRows = (rows: readonly WindowLike[], fallbackPrefix: string): Quota
  * renewal date and xAI's monthly billing rollover are excluded: a spend cap
  * turning over is not a rate limit lifting, and ranking cards by it would
  * answer a different question than the one being asked. Both still render
- * their own countdown.
+ * their own countdown. So do Claude's cloud session credits, a balance rather
+ * than a rate limit.
  */
 export function collectQuotaRowInstants(
   provider: QuotaProviderType,
@@ -91,7 +92,14 @@ export function collectQuotaRowInstants(
   if (!state || state.status !== 'success') return [];
 
   if (provider === 'claude' || provider === 'codex' || provider === 'devin') {
-    const windows = collectRows((quota as { windows?: WindowLike[] }).windows ?? [], 'window');
+    const windows = collectRows(
+      // Claude's cloud session credits reset on their own clock, but that
+      // restores no API capacity, so it is not a recovery.
+      ((quota as { windows?: WindowLike[] }).windows ?? []).filter(
+        (window) => window.id !== CLAUDE_CLOUD_SESSION_CREDITS_ID
+      ),
+      'window'
+    );
     if (provider !== 'codex') return windows;
 
     const credits = (

@@ -44,6 +44,21 @@ describe('collectQuotaRowInstants', () => {
     ]);
   });
 
+  test('skips Claude cloud session credits, which restore no API capacity', () => {
+    const quota = {
+      status: 'success',
+      windows: [
+        { id: 'seven-day', resetAtMs: NOW + DAY_MS },
+        { id: 'cloud-session-credits', resetAtMs: NOW + HOUR_MS / 2 },
+      ],
+    };
+    expect(collectQuotaRowInstants('claude', quota)).toEqual([
+      { rowId: 'seven-day', atMs: NOW + DAY_MS, kind: 'window' },
+    ]);
+    expect(nextRecoveryMs('claude', quota, NOW)).toBe(NOW + DAY_MS);
+    expect(pickUrgentRowId(collectQuotaRowInstants('claude', quota), NOW)).toBeNull();
+  });
+
   test('collects Codex windows and available reset credits together', () => {
     const instants = collectQuotaRowInstants('codex', codexQuota);
     expect(instants).toHaveLength(4);
