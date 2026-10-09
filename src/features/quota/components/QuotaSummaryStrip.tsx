@@ -221,12 +221,16 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
   const servingClass =
     model.serving === model.carrying
       ? styles.markOpen
-      : model.serving === 0 && model.unknown === 0
-        ? styles.markClosed
-        : model.serving === 0
+      : model.serving > 0 || model.partial > 0
+        ? styles.markTight
+        : model.unknown > 0
           ? styles.markUnknown
-          : styles.markTight;
-  const serving = { serving: model.serving, total: model.carrying, unknown: model.unknown };
+          : styles.markClosed;
+  const servingText = [
+    t('quota_management.summary_serving', { serving: model.serving, total: model.carrying }),
+    ...(model.partial > 0 ? [t('quota_management.summary_partial', { count: model.partial })] : []),
+    ...(model.unknown > 0 ? [t('quota_management.summary_unknown', { count: model.unknown })] : []),
+  ].join(' · ');
 
   return (
     <div className={styles.model}>
@@ -235,9 +239,7 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
         {model.carrying > 0 && (
           <span className={styles.modelServing}>
             <span className={`${styles.mark} ${servingClass}`} aria-hidden="true" />
-            {model.unknown > 0
-              ? t('quota_management.summary_serving_unknown', serving)
-              : t('quota_management.summary_serving', serving)}
+            {servingText}
           </span>
         )}
       </div>
@@ -255,7 +257,7 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
           count: line.segments.length,
         })}
       />
-      {model.serving > 0 && (
+      {(model.serving > 0 || model.partial > 0) && (
         <div className={styles.modelOutlook}>
           <span
             className={`${styles.mark} ${model.short > 0 ? styles.markTight : styles.markOpen}`}

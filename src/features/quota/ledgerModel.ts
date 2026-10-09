@@ -176,6 +176,8 @@ export interface ProviderModelSummary {
    * short). An unavailable credential or an unknown lane never counts.
    */
   serving: number;
+  /** Of those, how many serve only some of the model's ids: the proxy paused the others. */
+  partial: number;
   /** Of those, how many cannot be told: a gate without a figure, or unreported pauses. */
   unknown: number;
   /** Of those, how many are projected to stop before their refill. */
@@ -280,15 +282,14 @@ export function summarizeProvider(
       const lanes = lanesBySnapshot
         .map((snapshotLanes) => snapshotLanes.find((lane) => lane.id === line.id))
         .filter((lane): lane is QuotaLane => lane !== undefined);
-      const stops = lanes.flatMap((lane) =>
-        lane.status === 'tight' && lane.runoutAtMs !== null ? [lane.runoutAtMs] : []
-      );
+      const stops = lanes.flatMap((lane) => (lane.runoutAtMs !== null ? [lane.runoutAtMs] : []));
       return [
         {
           line,
           model: column.model as string,
           carrying: lanes.length,
           serving: lanes.filter((lane) => lane.status === 'open' || lane.status === 'tight').length,
+          partial: lanes.filter((lane) => lane.status === 'partial').length,
           unknown: lanes.filter((lane) => lane.status === 'unknown').length,
           short: stops.length,
           firstStopMs: stops.length > 0 ? Math.min(...stops) : null,

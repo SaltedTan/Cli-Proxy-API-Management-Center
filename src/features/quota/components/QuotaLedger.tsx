@@ -477,13 +477,14 @@ function LaneCell({
   const statusClass = {
     open: styles.statusOpen,
     tight: styles.statusTight,
+    partial: styles.statusPartial,
     closed: styles.statusClosed,
     unavailable: styles.statusClosed,
     unknown: styles.statusUnknown,
   }[lane.status];
 
   let foot: ReactNode = null;
-  if (lane.status === 'tight' && lane.runoutAtMs !== null) {
+  if (lane.runoutAtMs !== null) {
     foot = (
       <>
         {t('quota_management.lane_runs_out', { at: at(approximateInstant(lane.runoutAtMs)) })}
@@ -509,7 +510,9 @@ function LaneCell({
     // and an unknown lane makes none.
     const ownPace = computeWindowPace(own, now);
     foot =
-      lane.status === 'open' && ownPace.status !== 'unknown' && !ownPace.early ? (
+      (lane.status === 'open' || lane.status === 'partial') &&
+      ownPace.status !== 'unknown' &&
+      !ownPace.early ? (
         <>
           {t('quota_management.lane_lasts')}
           <span className={styles.laneAside}>{at(own.resetAtMs)}</span>
@@ -535,7 +538,7 @@ function LaneCell({
         <span className={styles.laneGateLabel} title={gate.label}>
           {gate.label}
         </span>
-        {lane.status === 'tight' && gate.id !== own.id && (
+        {lane.runoutAtMs !== null && gate.id !== own.id && (
           <span className={styles.laneCaution}>
             {t('quota_management.lane_runs_out_before', { name: title })}
           </span>
@@ -555,10 +558,17 @@ function LaneCell({
       {lane.status === 'unavailable' && (
         <div className={styles.laneNote}>{t('quota_management.lane_unavailable_note')}</div>
       )}
-      {lane.pause?.scope === 'model' && (
-        <div className={styles.laneNote}>
-          {t('quota_management.lane_pause_model', { model: title })}
-        </div>
+      {lane.modelPauses.length > 0 && (
+        <ul className={styles.laneModelPauses}>
+          {lane.modelPauses.map((pause) => (
+            <li key={pause.modelKey} className={styles.laneNote}>
+              {t('quota_management.lane_model_paused', {
+                model: pause.modelKey,
+                relative: formatRelativeInstant(pause.untilMs, now, locale),
+              })}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -580,7 +590,7 @@ function LimitChips({ snapshot, lanes }: { snapshot: LedgerSnapshot; lanes: Quot
   const labelId = useId();
   const deciding = new Set(
     lanes
-      .filter((lane) => lane.status === 'tight' || lane.status === 'closed')
+      .filter((lane) => lane.status === 'closed' || lane.runoutAtMs !== null)
       .map((lane) => lane.gate.id)
   );
   const account = snapshot.windows

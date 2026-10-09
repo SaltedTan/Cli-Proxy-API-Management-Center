@@ -145,20 +145,79 @@ describe('buildQuotaLanes', () => {
     expect(otherLane).toMatchObject({ status: 'closed', reopenAtMs: null });
   });
 
-  test("the proxy's model pause closes only that model's lane", () => {
+  test('a model pause outside every model lane makes the other-models lane partial', () => {
+    const until = NOW + 4 * HOUR_MS;
+    const { fableLane, otherLane } = lanesOf(
+      [sevenDay(60), fiveHour(90), fable(60)],
+      [{ scope: 'model', modelKey: 'claude-sonnet-4-5', untilMs: until }]
+    );
+    expect(otherLane).toMatchObject({ status: 'partial', pause: null, reopenAtMs: null });
+    expect(otherLane.modelPauses).toEqual([
+      { scope: 'model', modelKey: 'claude-sonnet-4-5', untilMs: until },
+    ]);
+    // The lane still reads its quota; the pause restricts one model id only.
+    expect(otherLane.gate.id).toBe('seven-day');
+    expect(fableLane).toMatchObject({ status: 'open', modelPauses: [] });
+  });
+
+  test("a model pause restricts its own id, never the whole of a model's lane", () => {
+    // Another Fable version is paused; the lane is "Fable 5.1".
     const until = NOW + 4 * DAY_MS;
+    const { fableLane, otherLane } = lanesOf(
+      [sevenDay(60), fiveHour(90), { ...fable(40), model: 'Fable 5.1' }],
+      [{ scope: 'model', modelKey: 'claude-fable-5-0', untilMs: until }]
+    );
+    expect(fableLane).toMatchObject({ status: 'partial', reopenAtMs: null });
+    expect(fableLane.modelPauses.map((pause) => pause.modelKey)).toEqual(['claude-fable-5-0']);
+    expect(fableLane.gate.id).toBe('seven-day-fable');
+    // A Fable id belongs to the Fable lane, not to every other model.
+    expect(otherLane).toMatchObject({ status: 'open', modelPauses: [] });
+  });
+
+  test('model pauses match whole words of the id, soonest lift first, expired ones dropped', () => {
     const { fableLane, otherLane } = lanesOf(
       [sevenDay(60), fiveHour(90), fable(40)],
       [
-        { scope: 'model', modelKey: 'claude-fable-5-1', untilMs: until },
-        { scope: 'model', modelKey: 'claude-opus-5-5', untilMs: until },
+        { scope: 'model', modelKey: 'claude-fable-5-1', untilMs: NOW + 2 * HOUR_MS },
+        { scope: 'model', modelKey: 'claude-fable-5-0', untilMs: NOW + HOUR_MS },
+        { scope: 'model', modelKey: 'claude-fable-4-0', untilMs: NOW - MINUTE_MS },
+        { scope: 'model', modelKey: 'claude-fableish-1', untilMs: NOW + HOUR_MS },
       ]
     );
-    expect(fableLane).toMatchObject({ status: 'closed', reopenAtMs: until });
-    expect(fableLane.pause?.modelKey).toBe('claude-fable-5-1');
-    // Its own limit is not empty, so the lane still reads it.
-    expect(fableLane.gate.id).toBe('seven-day-fable');
-    expect(otherLane.status).toBe('open');
+    expect(fableLane.modelPauses.map((pause) => pause.modelKey)).toEqual([
+      'claude-fable-5-0',
+      'claude-fable-5-1',
+    ]);
+    expect(otherLane.modelPauses.map((pause) => pause.modelKey)).toEqual(['claude-fableish-1']);
+  });
+
+  test('a partial lane keeps its projection, and a closed one stays closed', () => {
+    const pause: LedgerPause = {
+      scope: 'model',
+      modelKey: 'claude-fable-5-1',
+      untilMs: NOW + HOUR_MS,
+    };
+    const short = lanesOf([sevenDay(80), fiveHour(90), fable(10)], [pause]).fableLane;
+    expect(short.status).toBe('partial');
+    expect(short.runoutAtMs).not.toBeNull();
+    const empty = lanesOf([sevenDay(80), fiveHour(90), fable(0)], [pause]).fableLane;
+    expect(empty.status).toBe('closed');
+    // The gate decides when the lane reopens, not the pause on one id.
+    expect(empty.reopenAtMs).toBe(WEEKLY_RESET);
+  });
+
+  test('partial lanes do not count as serving', () => {
+    const windows = [sevenDay(80), fiveHour(90), fable(70)];
+    const summary = summarizeProvider(
+      [
+        snapshot(windows, []),
+        snapshot(windows, [
+          { scope: 'model', modelKey: 'claude-fable-5-1', untilMs: NOW + HOUR_MS },
+        ]),
+      ],
+      NOW
+    );
+    expect(summary.models[0]).toMatchObject({ carrying: 2, serving: 1, partial: 1 });
   });
 
   test("the proxy's credential pause closes every lane; expired pauses are ignored", () => {

@@ -23,6 +23,10 @@
  * CLIProxyAPIHome owns routing), leaves the lane unknown unless a known gate
  * already closes it.
  *
+ * The proxy also pauses single models (by canonical model id). Such a pause
+ * restricts that id only, never the lane's quota, so a lane with one is partial:
+ * it still serves the lane's other models.
+ *
  * Pure and clock-free like paceModel.ts: `nowMs` is always passed in.
  */
 
@@ -33,7 +37,7 @@ import { MINUTE_MS } from '@/utils/time/durations';
 import type { CredentialBlock, LedgerPause, LedgerSnapshot, LedgerWindow } from './ledgerModel';
 import { computeWindowPace } from './paceModel';
 
-export type LaneStatus = 'open' | 'tight' | 'closed' | 'unavailable' | 'unknown';
+export type LaneStatus = 'open' | 'tight' | 'partial' | 'closed' | 'unavailable' | 'unknown';
 
 /** Lane id for every model without a limit of its own. */
 export const OTHER_MODELS_LANE_ID = 'other-models';
@@ -55,12 +59,14 @@ export interface QuotaLane {
   own: LedgerWindow;
   /** The window that decides the lane — `own` unless another gate stops it sooner. */
   gate: LedgerWindow;
-  /** Running short: when `gate` empties at its cycle-average burn. */
+  /** Running short (or partial and running short): when `gate` empties at its cycle-average burn. */
   runoutAtMs: number | null;
   /** Closed: when every empty gate and pause has lifted; null when unknown. */
   reopenAtMs: number | null;
-  /** The proxy pause that holds this lane, if any. */
+  /** The proxy's credential-wide pause that holds this lane, if any. */
   pause: LedgerPause | null;
+  /** The proxy's active pauses on single models of this lane; partial while any remains. */
+  modelPauses: LedgerPause[];
   /** Unavailable: why the proxy will not select the credential at all. */
   block: CredentialBlock | null;
   /** The proxy did not report its pauses, so none can be ruled out. */
@@ -85,26 +91,64 @@ export const isModelWindow = (window: Pick<LedgerWindow, 'scope' | 'model'>): bo
 export const hasModelLanes = (snapshot: LedgerSnapshot | null): boolean =>
   snapshot?.windows.some(isModelWindow) ?? false;
 
-/** "Fable 5.1" → "fable": the family a model key such as `claude-fable-5-1` contains. */
+/** "Fable 5.1" → "fable": the family a model-scoped limit covers. */
 const modelFamily = (model: string) => model.trim().split(/\s+/)[0].toLowerCase();
 
-/** The latest-lifting active pause that stops this lane: credential-wide, or its own model's. */
-function pauseFor(
-  model: string | null,
+/**
+ * Whether a model id such as `claude-fable-5-0` belongs to a family: one of the
+ * id's words is the family's name. Whole words only, so a family never matches
+ * inside another word.
+ */
+const inFamily = (modelKey: string, family: string) =>
+  modelKey
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .includes(family);
+
+const activeIn = (pauses: readonly LedgerPause[] | null | undefined, nowMs: number) =>
+  (pauses ?? []).filter((pause) => pause.untilMs > nowMs);
+
+/** The latest-lifting active credential-wide pause; it stops every lane. */
+function credentialPauseOf(
   pauses: readonly LedgerPause[] | null | undefined,
   nowMs: number
 ): LedgerPause | null {
-  const family = model ? modelFamily(model) : null;
-  const holding = (pauses ?? []).filter(
-    (pause) =>
-      pause.untilMs > nowMs &&
-      (pause.scope === 'credential' ||
-        (family !== null && (pause.modelKey ?? '').toLowerCase().includes(family)))
-  );
-  return holding.reduce<LedgerPause | null>(
-    (latest, pause) => (latest === null || pause.untilMs > latest.untilMs ? pause : latest),
-    null
-  );
+  return activeIn(pauses, nowMs)
+    .filter((pause) => pause.scope === 'credential')
+    .reduce<LedgerPause | null>(
+      (latest, pause) => (latest === null || pause.untilMs > latest.untilMs ? pause : latest),
+      null
+    );
+}
+
+/**
+ * Active model pauses that fall in a lane, soonest lift first. The proxy keys
+ * them by canonical model id, so each restricts that one id: a model lane takes
+ * the ids of its family (the models its scoped limit gates), and the lane of
+ * every other model takes the ids no model lane claims.
+ */
+function modelPausesOf(
+  family: string | null,
+  laneFamilies: readonly string[],
+  pauses: readonly LedgerPause[] | null | undefined,
+  nowMs: number
+): LedgerPause[] {
+  return activeIn(pauses, nowMs)
+    .filter((pause) => {
+      if (pause.scope !== 'model' || !pause.modelKey) return false;
+      const key = pause.modelKey;
+      return family !== null
+        ? inFamily(key, family)
+        : !laneFamilies.some((laneFamily) => inFamily(key, laneFamily));
+    })
+    .sort((a, b) => a.untilMs - b.untilMs);
+}
+
+interface LaneRestrictions {
+  pause: LedgerPause | null;
+  modelPauses: LedgerPause[];
+  block: CredentialBlock | null;
+  pausesUnknown: boolean;
 }
 
 function decideLane(
@@ -112,12 +156,11 @@ function decideLane(
   model: string | null,
   own: LedgerWindow,
   gates: readonly LedgerWindow[],
-  pause: LedgerPause | null,
-  block: CredentialBlock | null,
-  pausesUnknown: boolean,
+  restrictions: LaneRestrictions,
   nowMs: number
 ): QuotaLane {
-  const base = { id, model, own, pause, block, pausesUnknown, runoutAtMs: null, reopenAtMs: null };
+  const { pause, block, pausesUnknown, modelPauses } = restrictions;
+  const base = { id, model, own, ...restrictions, runoutAtMs: null, reopenAtMs: null };
 
   // Nothing reopens a credential the proxy will not select; its quota is moot.
   if (block) return { ...base, status: 'unavailable', gate: own };
@@ -149,6 +192,10 @@ function decideLane(
     return { ...base, status: 'unknown', gate: unknownGate ?? own };
   }
 
+  // A model pause restricts one model id, not the lane's quota: the lane still
+  // serves its other models, so it is partial rather than closed.
+  const serving = modelPauses.length > 0 ? 'partial' : null;
+
   let first: { gate: LedgerWindow; atMs: number } | null = null;
   for (const gate of gates) {
     if (gate !== own && (gate.periodHours ?? 0) < TAKEOVER_MIN_PERIOD_HOURS) continue;
@@ -158,9 +205,11 @@ function decideLane(
       first = { gate, atMs: pace.exhaustedAtMs };
     }
   }
-  if (first) return { ...base, status: 'tight', gate: first.gate, runoutAtMs: first.atMs };
+  if (first) {
+    return { ...base, status: serving ?? 'tight', gate: first.gate, runoutAtMs: first.atMs };
+  }
 
-  return { ...base, status: 'open', gate: own };
+  return { ...base, status: serving ?? 'open', gate: own };
 }
 
 /**
@@ -170,21 +219,25 @@ function decideLane(
  */
 export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaLane[] {
   const account = snapshot.windows.filter((window) => window.scope === 'account');
-  const pausesUnknown = snapshot.pauses === null;
-  const lanes = snapshot.windows
-    .filter(isModelWindow)
-    .map((window) =>
-      decideLane(
-        window.id,
-        window.model ?? null,
-        window,
-        [...account, window],
-        pauseFor(window.model ?? null, snapshot.pauses, nowMs),
-        snapshot.block ?? null,
-        pausesUnknown,
-        nowMs
-      )
-    );
+  const modelWindows = snapshot.windows.filter(isModelWindow);
+  const laneFamilies = modelWindows.map((window) => modelFamily(window.model as string));
+  const restrictionsFor = (family: string | null): LaneRestrictions => ({
+    pause: credentialPauseOf(snapshot.pauses, nowMs),
+    modelPauses: modelPausesOf(family, laneFamilies, snapshot.pauses, nowMs),
+    block: snapshot.block ?? null,
+    pausesUnknown: snapshot.pauses === null,
+  });
+
+  const lanes = modelWindows.map((window, index) =>
+    decideLane(
+      window.id,
+      window.model ?? null,
+      window,
+      [...account, window],
+      restrictionsFor(laneFamilies[index]),
+      nowMs
+    )
+  );
 
   const longest = account.reduce<LedgerWindow | null>(
     (best, window) =>
@@ -193,16 +246,7 @@ export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaL
   );
   if (longest) {
     lanes.push(
-      decideLane(
-        OTHER_MODELS_LANE_ID,
-        null,
-        longest,
-        account,
-        pauseFor(null, snapshot.pauses, nowMs),
-        snapshot.block ?? null,
-        pausesUnknown,
-        nowMs
-      )
+      decideLane(OTHER_MODELS_LANE_ID, null, longest, account, restrictionsFor(null), nowMs)
     );
   }
   return lanes;

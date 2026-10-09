@@ -124,6 +124,30 @@ describe('QuotaSummaryStrip', () => {
       })
     );
     expect(unknown).toContain('0 of 1 can serve now · 1 unknown');
+
+    // A paused model id: partial, neither serving nor closed.
+    const partial = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [
+          {
+            provider: 'claude',
+            summary: summarizeProvider(
+              [
+                {
+                  ...credential(70),
+                  pauses: [{ scope: 'model', modelKey: 'claude-fable-5-1', untilMs: NOW + DAY_MS }],
+                },
+                credential(70),
+              ],
+              NOW
+            ),
+          },
+        ],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    expect(partial).toContain('1 of 2 can serve now · 1 partly paused');
     expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
   });
 
@@ -241,7 +265,9 @@ describe('lane locale keys', () => {
     'lane_status_unavailable',
     'lane_unavailable_note',
     'lane_pauses_unknown',
-    'summary_serving_unknown',
+    'summary_partial',
+    'summary_unknown',
+    'lane_status_partial',
     'ledger_disabled',
     'ledger_unavailable',
     'ledger_unavailable_message',
@@ -253,7 +279,7 @@ describe('lane locale keys', () => {
     'lane_runs_out',
     'lane_back',
     'lane_no_limit',
-    'lane_pause_model',
+    'lane_model_paused',
     'summary_serving',
     'summary_runs_short',
     'summary_none_short',

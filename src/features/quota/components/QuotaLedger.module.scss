@@ -430,7 +430,7 @@
   color: var(--text-primary);
 }
 
-/* 状态记号：形状 + 颜色双编码（圆 = 可用，三角 = 即将用尽，方块 = 已暂停） */
+/* 状态记号：形状 + 颜色双编码（圆 = 可用，三角 = 即将用尽，半色圆 = 部分模型暂停，方块 = 已暂停） */
 .statusMark {
   flex-shrink: 0;
   width: 9px;
@@ -453,6 +453,11 @@
 .statusClosed .statusMark {
   border-radius: 2px;
   background: var(--viz-failure);
+}
+
+/* 部分：半开半停的圆，表示仅部分模型被暂停 */
+.statusPartial .statusMark {
+  background: linear-gradient(90deg, var(--viz-success) 50%, var(--viz-failure) 50%);
 }
 
 .lanePercent {
@@ -506,6 +511,15 @@
 .laneNote {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+.laneModelPauses {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* ---------- 限额条：车道行的全部原始窗口 ---------- */
