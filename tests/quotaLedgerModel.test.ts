@@ -141,6 +141,28 @@ describe('summarizeProvider', () => {
     expect(summary.secondary.map((line) => line.id)).toEqual(['oauth']);
   });
 
+  test('cloud session credits never headline beside an actual limit', () => {
+    const credits = win({
+      id: 'cloud-session-credits',
+      remaining: 0,
+      resetAtMs: NOW + HOUR_MS,
+      scope: 'scoped',
+    });
+    const fable = win({
+      id: 'seven-day-fable',
+      remaining: 80,
+      periodHours: 168,
+      scope: 'scoped',
+      model: 'Fable',
+    });
+    const both: LedgerSnapshot = { plan: 'Max', windows: [credits, fable] };
+    expect(summarizeProvider([both, both], NOW).headline?.id).toBe('seven-day-fable');
+
+    // With nothing else reported, the credits still headline.
+    const only: LedgerSnapshot = { plan: 'Max', windows: [credits] };
+    expect(summarizeProvider([only], NOW).headline?.id).toBe('cloud-session-credits');
+  });
+
   test('model blocks count the credentials that could serve the model now', () => {
     const cycleStart = NOW - 4 * DAY_MS;
     const reset = cycleStart + 7 * DAY_MS;

@@ -282,6 +282,42 @@ describe('buildTimelineLane', () => {
     ]);
   });
 
+  test('claude: cloud session credits never anchor a lane', () => {
+    const weeklyReset = at(2026, 7, 1, 20);
+    const credits = {
+      id: 'cloud-session-credits',
+      label: 'Cloud session credits',
+      usedPercent: 100,
+      resetAtMs: at(2026, 6, 29, 20),
+      periodHours: null,
+    };
+    const weekly = {
+      id: 'seven-day',
+      label: '7-day',
+      usedPercent: 40,
+      resetAtMs: weeklyReset,
+      periodHours: 168,
+    };
+
+    const alone = buildTimelineLane({
+      ...base,
+      provider: 'claude',
+      quota: { status: 'success', windows: [credits] },
+      maxPeriodHours: 14 * 24,
+    });
+    expect(laneHasWindow(alone)).toBe(false);
+
+    // A three-day view fits neither window; the credits must not stand in.
+    const short = buildTimelineLane({
+      ...base,
+      provider: 'claude',
+      quota: { status: 'success', windows: [weekly, credits] },
+      maxPeriodHours: 3 * 24,
+    });
+    expect(short.anchorMs).toBe(weeklyReset);
+    expect(short.periodHours).toBe(168);
+  });
+
   test('codex: keeps the weekly lane on the account quota instead of Spark quota', () => {
     const accountReset = at(2026, 7, 1, 20);
     const sparkReset = at(2026, 6, 29, 20);

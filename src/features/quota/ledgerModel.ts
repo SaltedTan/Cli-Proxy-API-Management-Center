@@ -12,6 +12,7 @@
  */
 
 import type { QuotaWindowScope } from '@/types';
+import { CLAUDE_CLOUD_SESSION_CREDITS_ID } from '@/utils/quota';
 import { buildQuotaLanes, isModelWindow, type QuotaLane } from './laneModel';
 import { computeWindowPace, type PaceCounts } from './paceModel';
 
@@ -221,7 +222,8 @@ export interface ProviderSummary {
  * model-scoped weekly window on a subset of subscriptions) would otherwise
  * headline a pool that leaves most of the provider out; it stays visible as a
  * secondary line instead. Scoped windows never headline while an account-wide
- * one exists: the headline pools a limit that gates every request.
+ * one exists: the headline pools a limit that gates every request. Claude's
+ * cloud session credits never headline beside an actual limit.
  *
  * A model-scoped window (one with a ledger lane) is summarized as a model block
  * rather than a secondary line, so it can say how many credentials could serve
@@ -274,10 +276,13 @@ export function summarizeProvider(
   });
 
   const columnFor = (line: ProviderSummaryLine) => columns.find((column) => column.id === line.id);
-  const accountWide = lines.filter((line) => columnFor(line)?.scope !== 'scoped');
+  // Claude's cloud session credits are a balance, not a limit: they headline
+  // only when the provider reports nothing else.
+  const limits = lines.filter((line) => line.id !== CLAUDE_CLOUD_SESSION_CREDITS_ID);
+  const accountWide = limits.filter((line) => columnFor(line)?.scope !== 'scoped');
   // First line with the widest coverage; reduce keeps the earlier one on ties.
   const headline = (
-    accountWide.length > 0 ? accountWide : lines
+    accountWide.length > 0 ? accountWide : limits.length > 0 ? limits : lines
   ).reduce<ProviderSummaryLine | null>(
     (best, line) => (best === null || line.coverage > best.coverage ? line : best),
     null

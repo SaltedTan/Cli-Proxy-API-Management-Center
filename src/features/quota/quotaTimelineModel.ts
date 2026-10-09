@@ -10,6 +10,7 @@
  * week, and no per-card percentage shows that.
  */
 
+import { CLAUDE_CLOUD_SESSION_CREDITS_ID } from '@/utils/quota';
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 
@@ -379,7 +380,14 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
               (maxPeriodHours === undefined || window.periodHours <= maxPeriodHours)
           )
         : undefined;
-    const chosen = preferredCodexWindow ?? pickLaneWindow(windows, maxPeriodHours);
+    // Claude's cloud session credits are a balance with no period, not a rate
+    // limit, so they never anchor a lane.
+    const chosen =
+      preferredCodexWindow ??
+      pickLaneWindow(
+        windows.filter((window) => window.id !== CLAUDE_CLOUD_SESSION_CREDITS_ID),
+        maxPeriodHours
+      );
     if (!chosen) return empty;
 
     const resetCredits =
