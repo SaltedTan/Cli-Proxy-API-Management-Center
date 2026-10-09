@@ -164,6 +164,38 @@ describe('polled snapshot state', () => {
   });
 });
 
+describe('dashboard credential data', () => {
+  test('an older response that arrives last does not overwrite a newer one', async () => {
+    const { resource, reads } = harness();
+    const older = resource.refresh();
+    const newer = resource.refresh();
+    reads[1].resolve('newer');
+    expect(await newer).toBe(true);
+    reads[0].resolve('older');
+    expect(await older).toBe(false);
+    expect(resource.getSnapshot().data).toBe('newer');
+  });
+
+  test('auth files are polled like routing, through the guarded snapshot', async () => {
+    const { AUTH_FILES_POLL_INTERVAL_MS } =
+      await import('@/features/dashboard/hooks/useDashboardOverview');
+    const { ROUTING_POLL_INTERVAL_MS } =
+      await import('@/features/dashboard/hooks/useRoutingObservability');
+    expect(AUTH_FILES_POLL_INTERVAL_MS).toBe(ROUTING_POLL_INTERVAL_MS);
+    const source = await Bun.file(
+      new URL('../src/features/dashboard/hooks/useDashboardOverview.ts', import.meta.url)
+    ).text();
+    const polled = source.slice(source.indexOf('usePolledSnapshot({'));
+    const options = polled.slice(0, polled.indexOf('});'));
+    expect(options).toContain('scope: apiBase');
+    expect(options).toContain('intervalMs: AUTH_FILES_POLL_INTERVAL_MS');
+    expect(options).toContain('read: readAuthFiles');
+    // No unguarded state write is left behind.
+    expect(source).not.toContain('setAuthFiles');
+    expect(source.match(/authFilesApi\.list\(/g)).toHaveLength(1);
+  });
+});
+
 describe('a change followed by a refresh', () => {
   test('save and reset resolve whether the usage panel could be reloaded', async () => {
     const source = await Bun.file(

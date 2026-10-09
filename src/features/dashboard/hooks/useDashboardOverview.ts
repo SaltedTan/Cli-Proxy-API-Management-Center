@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { authFilesApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useModelsStore } from '@/stores';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
-import { useRoutingObservability } from './useRoutingObservability';
+import { ROUTING_POLL_INTERVAL_MS, useRoutingObservability } from './useRoutingObservability';
+import { usePolledSnapshot } from './usePolledSnapshot';
 import { useClientUsage } from './useClientUsage';
 import { clientUsageApi } from '@/services/api/clientUsage';
 import { clientUsageLimitsApi } from '@/services/api/clientUsageLimits';
@@ -97,6 +98,11 @@ const createAccumulator = (): ProviderAccumulator => ({
   bucketGroups: [],
 });
 
+/** Credential health and cooldowns feed the routing pool card, so they poll alike. */
+export const AUTH_FILES_POLL_INTERVAL_MS = ROUTING_POLL_INTERVAL_MS;
+
+const readAuthFiles = async (): Promise<AuthFileItem[]> => (await authFilesApi.list()).files;
+
 export const getProviderKeyCounts = (config: Config) => ({
   gemini: config.geminiApiKeys?.length ?? 0,
   interactions: config.interactionsApiKeys?.length ?? 0,
@@ -136,17 +142,15 @@ export function useDashboardOverview() {
   const { routing, refreshRouting } = useRoutingObservability(connected, apiBase);
   const { clientUsage, refreshClientUsage } = useClientUsage(connected, apiBase);
 
-  const [authFiles, setAuthFiles] = useState<AuthFileItem[] | null>(null);
-
-  const loadAuthFiles = useCallback(async () => {
-    if (!connected) return;
-    try {
-      const response = await authFilesApi.list();
-      setAuthFiles(response.files);
-    } catch {
-      setAuthFiles(null);
-    }
-  }, [connected]);
+  // Polled with the same request ordering and connection guards as routing and usage.
+  const { state: authFilesState, refresh: loadAuthFiles } = usePolledSnapshot({
+    enabled: connected,
+    scope: apiBase,
+    intervalMs: AUTH_FILES_POLL_INTERVAL_MS,
+    read: readAuthFiles,
+  });
+  // As before, a failed load shows no credential data rather than cooldowns that may be over.
+  const authFiles = authFilesState.stale ? null : authFilesState.data;
 
   const loadModels = useCallback(async () => {
     if (!connected || !apiBase) return;
@@ -161,9 +165,8 @@ export function useDashboardOverview() {
   useEffect(() => {
     if (!connected) return;
     void fetchConfig().catch(() => undefined);
-    void loadAuthFiles();
     void loadModels();
-  }, [connected, fetchConfig, loadAuthFiles, loadModels]);
+  }, [connected, fetchConfig, loadModels]);
 
   const refresh = useCallback(async () => {
     if (!connected) return;
