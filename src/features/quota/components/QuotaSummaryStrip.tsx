@@ -221,9 +221,12 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
   const servingClass =
     model.serving === model.carrying
       ? styles.markOpen
-      : model.serving === 0
+      : model.serving === 0 && model.unknown === 0
         ? styles.markClosed
-        : styles.markTight;
+        : model.serving === 0
+          ? styles.markUnknown
+          : styles.markTight;
+  const serving = { serving: model.serving, total: model.carrying, unknown: model.unknown };
 
   return (
     <div className={styles.model}>
@@ -232,10 +235,9 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
         {model.carrying > 0 && (
           <span className={styles.modelServing}>
             <span className={`${styles.mark} ${servingClass}`} aria-hidden="true" />
-            {t('quota_management.summary_serving', {
-              serving: model.serving,
-              total: model.carrying,
-            })}
+            {model.unknown > 0
+              ? t('quota_management.summary_serving_unknown', serving)
+              : t('quota_management.summary_serving', serving)}
           </span>
         )}
       </div>

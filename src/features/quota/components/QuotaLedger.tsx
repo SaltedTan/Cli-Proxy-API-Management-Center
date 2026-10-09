@@ -226,7 +226,7 @@ function LedgerRow({
   const canExpand = status === 'success' || status === 'error';
   const isExpanded = expanded && canExpand;
   const pauses = ledgerPausesFromCooldowns(file.cooldownSnapshot);
-  const credentialPause = pauses
+  const credentialPause = (pauses ?? [])
     .filter((pause) => pause.scope === 'credential' && pause.untilMs > now)
     .reduce<number | null>((latest, pause) => Math.max(latest ?? 0, pause.untilMs), null);
   const block = credentialBlockFromAuthFile(file, pauses);
@@ -505,10 +505,11 @@ function LaneCell({
         </>
       );
   } else if (lane.status !== 'unavailable' && own.resetAtMs !== null && own.resetAtMs > now) {
-    // "Lasts" is a projection, so it waits until the cycle is far enough along to make one.
+    // "Lasts" is a projection, so it waits until the cycle is far enough along to make one,
+    // and an unknown lane makes none.
     const ownPace = computeWindowPace(own, now);
     foot =
-      ownPace.status !== 'unknown' && !ownPace.early ? (
+      lane.status === 'open' && ownPace.status !== 'unknown' && !ownPace.early ? (
         <>
           {t('quota_management.lane_lasts')}
           <span className={styles.laneAside}>{at(own.resetAtMs)}</span>
@@ -548,6 +549,9 @@ function LaneCell({
         {knownPace && <PaceMark pace={knownPace} classes={paceStyles} />}
       </div>
       {foot && <div className={styles.laneFoot}>{foot}</div>}
+      {lane.status === 'unknown' && lane.pausesUnknown && (
+        <div className={styles.laneNote}>{t('quota_management.lane_pauses_unknown')}</div>
+      )}
       {lane.status === 'unavailable' && (
         <div className={styles.laneNote}>{t('quota_management.lane_unavailable_note')}</div>
       )}

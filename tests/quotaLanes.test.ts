@@ -58,13 +58,13 @@ const fable = (remaining: number | null, resetAtMs: number | null = WEEKLY_RESET
   model: 'Fable',
 });
 
-const snapshot = (windows: LedgerWindow[], pauses?: LedgerPause[]): LedgerSnapshot => ({
+const snapshot = (windows: LedgerWindow[], pauses?: LedgerPause[] | null): LedgerSnapshot => ({
   plan: 'Max 5x',
   windows,
-  ...(pauses ? { pauses } : {}),
+  ...(pauses !== undefined ? { pauses } : {}),
 });
 
-const lanesOf = (windows: LedgerWindow[], pauses?: LedgerPause[]) => {
+const lanesOf = (windows: LedgerWindow[], pauses?: LedgerPause[] | null) => {
   const lanes = buildQuotaLanes(snapshot(windows, pauses), NOW);
   const byId = (id: string) => lanes.find((lane) => lane.id === id) as QuotaLane;
   return { lanes, fableLane: byId('seven-day-fable'), otherLane: byId(OTHER_MODELS_LANE_ID) };
@@ -185,6 +185,47 @@ describe('buildQuotaLanes', () => {
     expect(fableLane.status).toBe('unknown');
   });
 
+  test('an unknown account-wide gate leaves a lane unknown, not open', () => {
+    // Fable reads 70%, but nobody knows whether the 7-day limit is empty.
+    const { fableLane, otherLane } = lanesOf([sevenDay(null), fiveHour(90), fable(70)]);
+    expect(fableLane.status).toBe('unknown');
+    expect(fableLane.gate.id).toBe('seven-day');
+    expect(otherLane.status).toBe('unknown');
+  });
+
+  test('an unknown gate does not hide one that is known to be empty', () => {
+    const { lanes } = lanesOf([sevenDay(null), fiveHour(0), fable(70)]);
+    expect(lanes.map((lane) => lane.status)).toEqual(['closed', 'closed']);
+  });
+
+  test('unreported pauses leave every lane unknown, unless a known gate closes it', () => {
+    const { lanes } = lanesOf([sevenDay(80), fiveHour(90), fable(70)], null);
+    for (const lane of lanes) {
+      expect(lane).toMatchObject({ status: 'unknown', pausesUnknown: true });
+      expect(lane.gate).toBe(lane.own);
+    }
+    const empty = lanesOf([sevenDay(80), fiveHour(90), fable(0)], null);
+    expect(empty.fableLane.status).toBe('closed');
+    expect(empty.otherLane.status).toBe('unknown');
+    // Reported, with nothing active: the lanes read their quota.
+    expect(lanesOf([sevenDay(80), fiveHour(90), fable(70)], []).fableLane).toMatchObject({
+      status: 'open',
+      pausesUnknown: false,
+    });
+  });
+
+  test('unknown lanes never count as serving', () => {
+    const summary = summarizeProvider(
+      [
+        snapshot([sevenDay(80), fiveHour(90), fable(70)], []),
+        snapshot([sevenDay(80), fiveHour(90), fable(70)], null),
+        snapshot([sevenDay(null), fiveHour(90), fable(70)], []),
+      ],
+      NOW
+    );
+    expect(summary.models[0]).toMatchObject({ carrying: 3, serving: 1, unknown: 2 });
+  });
+
   test('without an account-wide window there is no other-models lane', () => {
     const { lanes } = lanesOf([fable(60)]);
     expect(lanes.map((lane) => lane.id)).toEqual(['seven-day-fable']);
@@ -242,6 +283,13 @@ describe('credential availability', () => {
     });
     expect(credentialBlockFromAuthFile(authFile({ status: ' DISABLED ' }), [])).toEqual({
       reason: 'disabled',
+      message: null,
+    });
+  });
+
+  test('an unavailable credential is blocked when the pauses are unknown', () => {
+    expect(credentialBlockFromAuthFile(authFile({ unavailable: true }), null)).toEqual({
+      reason: 'unavailable',
       message: null,
     });
   });
@@ -308,9 +356,10 @@ describe('ledgerPausesFromCooldowns', () => {
     ]);
   });
 
-  test('unknown or missing runtime state means no pauses', () => {
-    expect(ledgerPausesFromCooldowns(undefined)).toEqual([]);
-    expect(ledgerPausesFromCooldowns({ receivedAtMs: NOW, records: null })).toEqual([]);
+  test('unknown or missing runtime state stays unknown, apart from no pauses', () => {
+    expect(ledgerPausesFromCooldowns(undefined)).toBeNull();
+    expect(ledgerPausesFromCooldowns({ receivedAtMs: NOW, records: null })).toBeNull();
+    expect(ledgerPausesFromCooldowns({ receivedAtMs: NOW, records: [] })).toEqual([]);
   });
 });
 

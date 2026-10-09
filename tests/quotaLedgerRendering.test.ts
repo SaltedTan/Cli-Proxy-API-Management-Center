@@ -109,6 +109,21 @@ describe('QuotaSummaryStrip', () => {
       })
     );
     expect(short).toContain('1 of 1 can serve now');
+
+    // Unreported pauses: unknown is neither serving nor paused.
+    const unknown = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [
+          {
+            provider: 'claude',
+            summary: summarizeProvider([{ ...credential(70), pauses: null }], NOW),
+          },
+        ],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    expect(unknown).toContain('0 of 1 can serve now · 1 unknown');
     expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
   });
 
@@ -225,6 +240,8 @@ describe('lane locale keys', () => {
     'lane_status_unknown',
     'lane_status_unavailable',
     'lane_unavailable_note',
+    'lane_pauses_unknown',
+    'summary_serving_unknown',
     'ledger_disabled',
     'ledger_unavailable',
     'ledger_unavailable_message',

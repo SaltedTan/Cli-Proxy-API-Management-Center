@@ -262,6 +262,11 @@
   background: var(--viz-failure);
 }
 
+/* 无法判断：中性色，不冒充可用或已暂停 */
+.markUnknown {
+  background: var(--text-tertiary);
+}
+
 /* ---------- 次要窗口（折叠） ---------- */
 
 .secondary {

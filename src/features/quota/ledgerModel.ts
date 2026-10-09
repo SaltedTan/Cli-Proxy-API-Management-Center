@@ -65,8 +65,11 @@ export interface LedgerSnapshot {
   plan: string | null;
   /** Headline window first. */
   windows: LedgerWindow[];
-  /** The proxy's active pauses on this credential; joined in from the auth-file list. */
-  pauses?: LedgerPause[];
+  /**
+   * The proxy's active pauses on this credential, joined in from the auth-file
+   * list; null when the proxy did not report them, so none can be ruled out.
+   */
+  pauses?: LedgerPause[] | null;
   /** Set when the proxy will not select the credential; joined in from the auth-file list. */
   block?: CredentialBlock | null;
 }
@@ -173,6 +176,8 @@ export interface ProviderModelSummary {
    * short). An unavailable credential or an unknown lane never counts.
    */
   serving: number;
+  /** Of those, how many cannot be told: a gate without a figure, or unreported pauses. */
+  unknown: number;
   /** Of those, how many are projected to stop before their refill. */
   short: number;
   /** The earliest projected stop among them. */
@@ -284,6 +289,7 @@ export function summarizeProvider(
           model: column.model as string,
           carrying: lanes.length,
           serving: lanes.filter((lane) => lane.status === 'open' || lane.status === 'tight').length,
+          unknown: lanes.filter((lane) => lane.status === 'unknown').length,
           short: stops.length,
           firstStopMs: stops.length > 0 ? Math.min(...stops) : null,
         },

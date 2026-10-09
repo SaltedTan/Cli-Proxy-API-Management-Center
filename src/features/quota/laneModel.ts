@@ -18,6 +18,11 @@
  * one it marked unavailable (CLIProxyAPI's isAuthBlockedForModel), whatever its
  * cached quota says. Such a lane is unavailable, and its quota stays readable.
  *
+ * Unknown is never open. A lane is only as known as every gate it depends on:
+ * one gate without a figure, or a proxy that did not report its pauses (when
+ * CLIProxyAPIHome owns routing), leaves the lane unknown unless a known gate
+ * already closes it.
+ *
  * Pure and clock-free like paceModel.ts: `nowMs` is always passed in.
  */
 
@@ -58,6 +63,8 @@ export interface QuotaLane {
   pause: LedgerPause | null;
   /** Unavailable: why the proxy will not select the credential at all. */
   block: CredentialBlock | null;
+  /** The proxy did not report its pauses, so none can be ruled out. */
+  pausesUnknown: boolean;
 }
 
 export interface LaneColumn {
@@ -84,7 +91,7 @@ const modelFamily = (model: string) => model.trim().split(/\s+/)[0].toLowerCase(
 /** The latest-lifting active pause that stops this lane: credential-wide, or its own model's. */
 function pauseFor(
   model: string | null,
-  pauses: readonly LedgerPause[] | undefined,
+  pauses: readonly LedgerPause[] | null | undefined,
   nowMs: number
 ): LedgerPause | null {
   const family = model ? modelFamily(model) : null;
@@ -107,9 +114,10 @@ function decideLane(
   gates: readonly LedgerWindow[],
   pause: LedgerPause | null,
   block: CredentialBlock | null,
+  pausesUnknown: boolean,
   nowMs: number
 ): QuotaLane {
-  const base = { id, model, own, pause, block, runoutAtMs: null, reopenAtMs: null };
+  const base = { id, model, own, pause, block, pausesUnknown, runoutAtMs: null, reopenAtMs: null };
 
   // Nothing reopens a credential the proxy will not select; its quota is moot.
   if (block) return { ...base, status: 'unavailable', gate: own };
@@ -135,6 +143,12 @@ function decideLane(
     };
   }
 
+  // Nothing closes the lane, but a gate it cannot read might.
+  const unknownGate = gates.find((gate) => gate.remaining === null);
+  if (unknownGate || pausesUnknown) {
+    return { ...base, status: 'unknown', gate: unknownGate ?? own };
+  }
+
   let first: { gate: LedgerWindow; atMs: number } | null = null;
   for (const gate of gates) {
     if (gate !== own && (gate.periodHours ?? 0) < TAKEOVER_MIN_PERIOD_HOURS) continue;
@@ -146,7 +160,7 @@ function decideLane(
   }
   if (first) return { ...base, status: 'tight', gate: first.gate, runoutAtMs: first.atMs };
 
-  return { ...base, status: own.remaining === null ? 'unknown' : 'open', gate: own };
+  return { ...base, status: 'open', gate: own };
 }
 
 /**
@@ -156,6 +170,7 @@ function decideLane(
  */
 export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaLane[] {
   const account = snapshot.windows.filter((window) => window.scope === 'account');
+  const pausesUnknown = snapshot.pauses === null;
   const lanes = snapshot.windows
     .filter(isModelWindow)
     .map((window) =>
@@ -166,6 +181,7 @@ export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaL
         [...account, window],
         pauseFor(window.model ?? null, snapshot.pauses, nowMs),
         snapshot.block ?? null,
+        pausesUnknown,
         nowMs
       )
     );
@@ -184,6 +200,7 @@ export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaL
         account,
         pauseFor(null, snapshot.pauses, nowMs),
         snapshot.block ?? null,
+        pausesUnknown,
         nowMs
       )
     );
@@ -208,12 +225,15 @@ export function buildLaneColumns(snapshots: readonly (LedgerSnapshot | null)[]):
  * The proxy's active cooldowns as pauses. The deadline is anchored to when the
  * list arrived plus the server-measured remaining time — never `retry_at`
  * against the local wall clock (see cooldownRemainingSeconds).
+ *
+ * Null when the proxy did not say: it reports `cooldowns: null` while
+ * CLIProxyAPIHome owns routing. That is not the same as no pauses.
  */
 export function ledgerPausesFromCooldowns(
   snapshot: AuthFileCooldownSnapshot | undefined
-): LedgerPause[] {
-  if (!snapshot) return [];
-  return (snapshot.records ?? [])
+): LedgerPause[] | null {
+  if (!snapshot || snapshot.records === null) return null;
+  return snapshot.records
     .filter((record) => record.remainingSeconds > 0)
     .map((record) => ({
       scope: record.scope,
@@ -232,14 +252,14 @@ export function ledgerPausesFromCooldowns(
  */
 export function credentialBlockFromAuthFile(
   file: AuthFileItem,
-  pauses: readonly LedgerPause[]
+  pauses: readonly LedgerPause[] | null
 ): CredentialBlock | null {
   const status = typeof file.status === 'string' ? file.status.trim().toLowerCase() : '';
   if (isDisabledAuthFile(file) || status === 'disabled') {
     return { reason: 'disabled', message: null };
   }
   if (file.unavailable !== true) return null;
-  if (pauses.some((pause) => pause.scope === 'credential')) return null;
+  if (pauses?.some((pause) => pause.scope === 'credential')) return null;
   return {
     reason: 'unavailable',
     message: hasAuthFileStatusWarning(file) ? getAuthFileStatusMessage(file) : null,
