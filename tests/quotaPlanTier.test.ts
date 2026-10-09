@@ -3,6 +3,8 @@ import en from '@/i18n/locales/en.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
 import zhTW from '@/i18n/locales/zh-TW.json';
 import ru from '@/i18n/locales/ru.json';
+import vi from '@/i18n/locales/vi.json';
+import ko from '@/i18n/locales/ko.json';
 import {
   ELITE_CODEX_PLAN_TYPE,
   PREMIUM_CODEX_PLAN_TYPES,
@@ -10,7 +12,7 @@ import {
 } from '@/utils/quota';
 
 describe('Codex Pro display names', () => {
-  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
+  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru, vi, ko })) {
     test(`${locale} labels Pro plans as Pro 100 and Pro 200`, () => {
       expect(messages.codex_quota.plan_prolite).toBe('Pro 100');
       expect(messages.codex_quota.plan_pro).toBe('Pro 200');

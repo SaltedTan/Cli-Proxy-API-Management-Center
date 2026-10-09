@@ -19,6 +19,8 @@ import en from '@/i18n/locales/en.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
 import zhTW from '@/i18n/locales/zh-TW.json';
 import ru from '@/i18n/locales/ru.json';
+import vi from '@/i18n/locales/vi.json';
+import ko from '@/i18n/locales/ko.json';
 
 const NOW = new Date(2026, 8, 10, 12).getTime();
 
@@ -285,7 +287,7 @@ describe('lane locale keys', () => {
     'summary_none_short',
   ] as const;
 
-  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
+  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru, vi, ko })) {
     test(`${locale} translates every lane and model-block string`, () => {
       const quota = messages.quota_management as Record<string, string>;
       expect(KEYS.filter((key) => !quota[key])).toEqual([]);
