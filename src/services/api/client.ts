@@ -16,6 +16,9 @@ import {
 import { computeApiUrl } from '@/utils/connection';
 import { parseApiErrorResponse } from './apiError';
 
+/** The connection revision a request was sent with; responses from older connections are stale. */
+type RevisionStampedConfig = { connectionRevision?: number };
+
 class ApiClient {
   private instance: AxiosInstance;
   private apiBase: string = '';
@@ -54,6 +57,12 @@ class ApiClient {
   /** Guards read/modify/write operations across connection changes, including ABA switches. */
   getConnectionRevision(): number {
     return this.connectionRevision;
+  }
+
+  private isCurrentConnection(config: unknown): boolean {
+    return (
+      (config as RevisionStampedConfig | undefined)?.connectionRevision === this.connectionRevision
+    );
   }
 
   private readHeader(headers: Record<string, unknown> | undefined, keys: string[]): string | null {
@@ -116,6 +125,7 @@ class ApiClient {
       (config) => {
         // 设置 baseURL
         config.baseURL = this.apiBase;
+        (config as RevisionStampedConfig).connectionRevision = this.connectionRevision;
 
         // 添加认证头
         if (this.managementKey) {
@@ -130,6 +140,9 @@ class ApiClient {
     // 响应拦截器
     this.instance.interceptors.response.use(
       (response) => {
+        // Server metadata from an old connection must not describe the current one.
+        if (!this.isCurrentConnection(response.config)) return response;
+
         const headers = response.headers as Record<string, string | undefined>;
         const cpaVersion = this.readHeader(headers, CPA_VERSION_HEADER_KEYS);
         const cpaBuildDate = this.readHeader(headers, CPA_BUILD_DATE_HEADER_KEYS);
@@ -174,8 +187,8 @@ class ApiClient {
       apiError.details = responseData;
       apiError.data = responseData;
 
-      // 401 未授权 - 触发登出事件
-      if (error.response?.status === 401) {
+      // 401 unauthorized: log out, unless the request belongs to an older connection.
+      if (error.response?.status === 401 && this.isCurrentConnection(error.config)) {
         window.dispatchEvent(new Event('unauthorized'));
       }
 
