@@ -39,6 +39,7 @@ import {
   type QuotaViewMode,
 } from './constants';
 import { credentialBlockFromAuthFile, ledgerPausesFromCooldowns } from './laneModel';
+import { createListingLoader } from './listingLoader';
 import { summarizeProvider, type LedgerSnapshot } from './ledgerModel';
 import { maskEmailsInText } from './maskEmail';
 import {
@@ -92,39 +93,31 @@ export function QuotaPage() {
 
   const sessionGeneration = useQuotaStore((state) => state.cacheGeneration);
   const [filesGeneration, setFilesGeneration] = useState<number | null>(null);
-  const listRequestRef = useRef(0);
-  // A background load keeps the current list on screen and drops a failure
-  // silently; the next foreground load reports it.
+  const [listLoader] = useState(createListingLoader);
   const loadFiles = useCallback(
     async ({ background = false }: { background?: boolean } = {}) => {
-      const requestId = ++listRequestRef.current;
       if (connectionStatus !== 'connected') {
+        listLoader.cancel();
         setFiles([]);
         setFilesGeneration(null);
         setLoading(false);
         return;
       }
-      const isCurrent = () =>
-        requestId === listRequestRef.current &&
-        sessionGeneration === useQuotaStore.getState().cacheGeneration;
-      if (!background) {
-        setLoading(true);
-        setError('');
-      }
-      try {
-        const data = await authFilesApi.list();
-        if (!isCurrent()) return;
-        setFiles(data?.files || []);
-        setFilesGeneration(sessionGeneration);
-      } catch (err: unknown) {
-        if (!isCurrent() || background) return;
-        const message = err instanceof Error ? err.message : t('notification.refresh_failed');
-        setError(message);
-      } finally {
-        if (isCurrent()) setLoading(false);
-      }
+      await listLoader.load({
+        background,
+        fetch: () => authFilesApi.list(),
+        isSessionCurrent: () => sessionGeneration === useQuotaStore.getState().cacheGeneration,
+        commit: (data) => {
+          setFiles(data?.files || []);
+          setFilesGeneration(sessionGeneration);
+        },
+        setLoading,
+        setError,
+        errorMessage: (err) =>
+          err instanceof Error ? err.message : t('notification.refresh_failed'),
+      });
     },
-    [connectionStatus, sessionGeneration, t]
+    [connectionStatus, listLoader, sessionGeneration, t]
   );
 
   const reloadFilesInBackground = useCallback(() => {
@@ -136,9 +129,9 @@ export function QuotaPage() {
   useEffect(() => {
     void loadFiles();
     return () => {
-      listRequestRef.current += 1;
+      listLoader.cancel();
     };
-  }, [loadFiles]);
+  }, [listLoader, loadFiles]);
 
   /* ---------- 额度缓存 ----------
    * 排在归类/排序之前：「最快恢复优先」要读它算排序键。 */
