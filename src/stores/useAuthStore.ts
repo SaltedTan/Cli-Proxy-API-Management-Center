@@ -9,6 +9,7 @@ import type { AuthState, LoginCredentials, ConnectionStatus } from '@/types';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
 import { obfuscatedStorage } from '@/services/storage/secureStorage';
 import { apiClient } from '@/services/api/client';
+import { guardConfigConnection } from '@/services/api/configValue';
 import { LegacyBackendError, probeLegacyBackend } from '@/services/api/legacyBackendProbe';
 import { useConfigStore } from './useConfigStore';
 import { useModelsStore } from './useModelsStore';
@@ -95,6 +96,7 @@ export const useAuthStore = create<AuthStoreState>()(
         const apiBase = normalizeApiBase(credentials.apiBase);
         const managementKey = credentials.managementKey.trim();
         const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false;
+        let revision: number | null = null;
 
         try {
           set({
@@ -113,8 +115,9 @@ export const useAuthStore = create<AuthStoreState>()(
             managementKey,
           });
 
-          // 测试连接 - 获取配置。只在 v8 路由不存在时诊断旧版后端。
-          const revision = apiClient.getConnectionRevision();
+          // Test the connection; diagnose an old backend only when v8 routes are missing.
+          revision = apiClient.getConnectionRevision();
+          const assertCurrentConnection = guardConfigConnection();
           try {
             await useConfigStore.getState().fetchConfig(true);
           } catch (error) {
@@ -129,7 +132,8 @@ export const useAuthStore = create<AuthStoreState>()(
             throw error;
           }
 
-          // 登录成功
+          // A logout or newer login during the request owns the session now.
+          assertCurrentConnection();
           set({
             isAuthenticated: true,
             apiBase,
@@ -143,7 +147,9 @@ export const useAuthStore = create<AuthStoreState>()(
             localStorage.removeItem('isLoggedIn');
           }
         } catch (error: unknown) {
-          set({ connectionStatus: 'error' });
+          if (revision === null || revision === apiClient.getConnectionRevision()) {
+            set({ connectionStatus: 'error' });
+          }
           throw error;
         }
       },
@@ -175,13 +181,15 @@ export const useAuthStore = create<AuthStoreState>()(
           return false;
         }
 
+        // Reconfigure the client and verify the connection.
+        apiClient.setConfig({ apiBase, managementKey });
+        const revision = apiClient.getConnectionRevision();
+        const isCurrent = () => revision === apiClient.getConnectionRevision();
         try {
-          // 重新配置客户端
-          apiClient.setConfig({ apiBase, managementKey });
           set({ supportsPlugin: false });
 
-          // 验证连接
           await useConfigStore.getState().fetchConfig();
+          if (!isCurrent()) return false;
 
           set({
             isAuthenticated: true,
@@ -190,6 +198,7 @@ export const useAuthStore = create<AuthStoreState>()(
 
           return true;
         } catch {
+          if (!isCurrent()) return false;
           set({
             isAuthenticated: false,
             connectionStatus: 'error',
