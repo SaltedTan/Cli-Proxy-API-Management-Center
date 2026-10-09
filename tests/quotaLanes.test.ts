@@ -285,6 +285,24 @@ describe('buildQuotaLanes', () => {
     expect(summary.models[0]).toMatchObject({ carrying: 3, serving: 1, unknown: 2 });
   });
 
+  test('spent cloud session credits gate no lane', () => {
+    // Claude's dollar-denominated credit pool: scoped, without a model or period.
+    const credits = {
+      id: 'cloud-session-credits',
+      label: 'Cloud session credits',
+      remaining: 0,
+      resetAtMs: NOW + 30 * DAY_MS,
+      resetLabel: null,
+      periodHours: null,
+      scope: 'scoped' as const,
+    };
+    const { lanes } = lanesOf([sevenDay(80), credits, fable(80)]);
+    expect(lanes.map((lane) => [lane.id, lane.status])).toEqual([
+      ['seven-day-fable', 'open'],
+      [OTHER_MODELS_LANE_ID, 'open'],
+    ]);
+  });
+
   test('without an account-wide window there is no other-models lane', () => {
     const { lanes } = lanesOf([fable(60)]);
     expect(lanes.map((lane) => lane.id)).toEqual(['seven-day-fable']);

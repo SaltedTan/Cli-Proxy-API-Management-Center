@@ -29,6 +29,7 @@ import { bindPaceClasses, bindQuotaClasses } from '../types';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
+import { ClaudeResetGrantDetails } from '../providers/claude/ClaudeResetGrantDetails';
 import type { LedgerSnapshot } from '../ledgerModel';
 import { QuotaPaceProvider } from './QuotaPace';
 import bodyStyles from './QuotaBody.module.scss';
@@ -155,6 +156,7 @@ export function QuotaCardContent(props: QuotaCardContentProps) {
                 <span className={quotaClasses.codexPlanValue}>{claudeReset.count ?? '--'}</span>
               </span>
             </div>
+            <ClaudeResetGrantDetails grants={claudeReset.grants} classes={quotaClasses} />
             {claudeReset.message && (
               <div role="status" className={quotaClasses.codexResetCreditsError}>
                 {t(`claude_reset.${claudeReset.message}`)}

@@ -118,6 +118,7 @@ export type PluginStoreAuthRule = {
 
 /** UI draft keys; YAML persistence uses the v8 tree, not these flattened names. */
 export type VisualConfigValues = {
+  githubToken: string;
   trustedProxies: string[];
   discoveryEnabled: boolean;
   discoveryServiceName: string;
@@ -222,6 +223,7 @@ export const makeClientId = () => {
 };
 
 export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
+  githubToken: '',
   trustedProxies: [],
   discoveryEnabled: false,
   discoveryServiceName: '',

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { I18nextProvider } from 'react-i18next';
 import { createInstance } from 'i18next';
+import { I18nextProvider } from 'react-i18next';
 import {
   readModelOptions,
   buildModelOptions,
@@ -12,10 +12,9 @@ import { ModelAdvancedFields } from '@/features/providers/sheets/forms/ModelAdva
 import type { ModelEntryInput, ProviderBrand } from '@/features/providers/types';
 import type { ModelAlias } from '@/types';
 
-// Labels render as their keys ('cimode'), whatever another test file did to the shared
-// i18n instance.
-const keys = createInstance();
-await keys.init({ lng: 'cimode' });
+// Keep key-based assertions independent of other suites initializing the app's i18n.
+const translations = createInstance();
+await translations.init({ lng: 'cimode', resources: {}, react: { useSuspense: false } });
 
 const draft = (model: ModelAlias): ModelEntryInput => ({
   name: model.name,
@@ -183,7 +182,7 @@ describe('provider model options', () => {
     renderToStaticMarkup(
       createElement(
         I18nextProvider,
-        { i18n: keys },
+        { i18n: translations },
         createElement(ModelAdvancedFields, {
           entry: { name: 'model', thinkingEnabled: enabled },
           providerBrand: brand,

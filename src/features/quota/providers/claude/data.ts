@@ -11,6 +11,7 @@ import type {
   ClaudeQuotaState,
   ClaudeQuotaWindow,
   ClaudeUsageLimit,
+  ClaudeUsageWindow,
   ClaudeUsagePayload,
 } from '@/types';
 import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
@@ -81,6 +82,11 @@ const findScopedModelLimits = (payload: ClaudeUsagePayload): ScopedModelLimit[] 
   });
 };
 
+const isDollarDenominatedWindow = (window: ClaudeUsageWindow) =>
+  normalizeNumberValue(window.limit_dollars) !== null ||
+  normalizeNumberValue(window.used_dollars) !== null ||
+  normalizeNumberValue(window.remaining_dollars) !== null;
+
 export const buildClaudeQuotaWindows = (
   payload: ClaudeUsagePayload,
   t: TFunction
@@ -90,10 +96,27 @@ export const buildClaudeQuotaWindows = (
   const scopedFamilies = new Set(scopedLimits.map(({ family }) => family));
 
   for (const { key, id, labelKey, scope, model } of CLAUDE_USAGE_WINDOW_KEYS) {
-    if (model && scopedFamilies.has(modelFamily(model))) continue;
     const window = payload[key as keyof ClaudeUsagePayload];
     if (!window || typeof window !== 'object' || !('utilization' in window)) continue;
-    const typedWindow = window as { utilization: number; resets_at: string | null };
+    const typedWindow = window as ClaudeUsageWindow;
+    // The legacy Fable key can instead carry dollar-denominated cloud session
+    // credits. Those are not a model limit, so a scoped Fable limit does not
+    // supersede them, and they state no period. Scoped without a model keeps
+    // them out of the account-wide windows that gate lanes.
+    if (key === 'iguana_necktie' && isDollarDenominatedWindow(typedWindow)) {
+      windows.push({
+        id: 'cloud-session-credits',
+        label: t('claude_quota.cloud_session_credits'),
+        labelKey: 'claude_quota.cloud_session_credits',
+        scope: 'scoped',
+        usedPercent: normalizeNumberValue(typedWindow.utilization),
+        resetLabel: formatQuotaResetTime(typedWindow.resets_at ?? undefined),
+        resetAtMs: resolveResetMs([typedWindow.resets_at]),
+        periodHours: null,
+      });
+      continue;
+    }
+    if (model && scopedFamilies.has(modelFamily(model))) continue;
     const usedPercent = normalizeNumberValue(typedWindow.utilization);
     const resetLabel = formatQuotaResetTime(typedWindow.resets_at ?? undefined);
     const labelParams = model ? { model } : undefined;
