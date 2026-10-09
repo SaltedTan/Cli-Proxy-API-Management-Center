@@ -478,7 +478,7 @@ function UsageRow({
 /**
  * The allowance editor. Native constraint validation is off (`noValidate`): a configured
  * value off the 0.05 spinner step, such as 1.23, must still reach the submit handler,
- * which validates and rounds instead. `inputRef` lets the handler read the input's
+ * which validates instead. `inputRef` lets the handler read the input's
  * `validity.badInput` flag.
  */
 export function ClaudeLimitEditorForm({

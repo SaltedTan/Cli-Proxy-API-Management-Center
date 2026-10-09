@@ -13,20 +13,14 @@ const PATH = '/config/access/api-key-limits';
 /** Limits by map key as configured (ids and full keys alike); only positive values. */
 export type ClientUsageLimits = Record<string, number>;
 
-const toLimit = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-
 /**
- * Rounds to two decimals; null for anything that does not set a limit (blank, 0, NaN,
- * negative). Always finite and idempotent: a value too large to round stays as it is,
- * so normalizing twice can never turn a limit into "clear".
+ * The allowance a value sets, exactly as given; null for anything that does not set one
+ * (blank, 0, negative, NaN, non-finite). Never rounded: the backend enforces positive
+ * values as configured, so a positive value always sets a limit and a configured value
+ * is written back unchanged.
  */
-export const normalizeClientUsageLimit = (value: number | null | undefined): number | null => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  const rounded = Math.round(value * 100) / 100;
-  const limit = Number.isFinite(rounded) ? rounded : value;
-  return limit > 0 ? limit : null;
-};
+export const normalizeClientUsageLimit = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 
 /** The map as stored, with every entry as the backend returned it. */
 const readRawLimits = async (): Promise<Record<string, unknown>> => {
@@ -99,7 +93,7 @@ export const clientUsageLimitsApi = {
     const limits: ClientUsageLimits = {};
     for (const [name, value] of Object.entries(await readRawLimits())) {
       const key = name.trim();
-      const limit = toLimit(value);
+      const limit = normalizeClientUsageLimit(value);
       if (key && limit !== null) limits[key] = limit;
     }
     return limits;
@@ -107,7 +101,7 @@ export const clientUsageLimitsApi = {
 
   /** Sets or, with `null`/`0`, removes the allowance of the key with id `keyId`. */
   async set(keyId: string, value: number | null): Promise<void> {
-    // Only null (or a value that rounds to 0) clears; a non-finite number is a bug.
+    // Only null or a value <= 0 clears; a non-finite number is a bug.
     if (value !== null && !Number.isFinite(value)) {
       throw new RangeError('Client key allowance must be a finite number');
     }

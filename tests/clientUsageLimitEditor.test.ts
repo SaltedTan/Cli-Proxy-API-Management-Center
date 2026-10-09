@@ -39,7 +39,7 @@ describe('client usage allowance editor', () => {
   test('submits without native constraint validation so off-step values reach the handler', () => {
     const markup = render();
     // A configured 1.23 is not on the 0.05 spinner step and must still be submittable;
-    // the handler rounds and validates instead of the browser.
+    // the handler validates instead of the browser.
     expect(markup).toMatch(/<form [^>]*novalidate=""/i);
     expect(markup).toContain('type="number"');
     expect(markup).toMatch(/inputmode="decimal"/i);

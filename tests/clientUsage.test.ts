@@ -950,9 +950,12 @@ describe('client usage logic', () => {
     expect(parseClaudeLimitInput('')).toBeNull();
     expect(parseClaudeLimitInput('  ')).toBeNull();
     expect(parseClaudeLimitInput('0')).toBeNull();
-    expect(parseClaudeLimitInput('0.004')).toBeNull();
+    expect(parseClaudeLimitInput('-0')).toBeNull();
+    // A positive value never clears the limit, however small, and is kept exactly.
+    expect(parseClaudeLimitInput('0.004')).toBe(0.004);
+    expect(parseClaudeLimitInput('1e-9')).toBe(1e-9);
     expect(parseClaudeLimitInput('1.5')).toBe(1.5);
-    expect(parseClaudeLimitInput(' 1.234 ')).toBe(1.23);
+    expect(parseClaudeLimitInput(' 1.234 ')).toBe(1.234);
     expect(parseClaudeLimitInput('10')).toBe(10);
     for (const invalid of ['-1', 'abc', '1e400', 'NaN', '1,5']) {
       expect(parseClaudeLimitInput(invalid)).toBeUndefined();
@@ -961,13 +964,18 @@ describe('client usage logic', () => {
     // a request to clear the limit.
     expect(parseClaudeLimitInput('', true)).toBeUndefined();
     expect(parseClaudeLimitInput('1.5', true)).toBeUndefined();
-    // Huge but finite values stay finite instead of overflowing while rounding.
+    // Huge but finite values stay finite.
     expect(parseClaudeLimitInput('1e308')).toBe(1e308);
     expect(formatClaudeLimitInput(null)).toBe('');
     expect(formatClaudeLimitInput(0)).toBe('');
     expect(formatClaudeLimitInput(1.5)).toBe('1.5');
     expect(formatClaudeLimitInput(2)).toBe('2');
-    expect(formatClaudeLimitInput(0.1 + 0.2)).toBe('0.3');
+    expect(formatClaudeLimitInput(0.125)).toBe('0.125');
+    expect(formatClaudeLimitInput(1e308)).toBe('1e+308');
+    // Opening and saving an unchanged allowance writes back exactly the configured value.
+    for (const limit of [0.125, 0.004, 1.234567, 0.1 + 0.2, 1e-9, 1e308, Number.MAX_VALUE]) {
+      expect(parseClaudeLimitInput(formatClaudeLimitInput(limit))).toBe(limit);
+    }
   });
 
   test('labels plans and formats Pro units', () => {

@@ -274,7 +274,11 @@ export function parseClaudeLimitInput(text: string, badInput = false): number | 
   return normalizeClientUsageLimit(value);
 }
 
-/** Editor text for a configured allowance (`1.5`, `0.25`); blank without a limit. */
+/**
+ * Editor text for a configured allowance (`1.5`, `0.125`); blank without a limit. Shown
+ * exactly (the shortest text that parses back to the same number), so saving it
+ * unchanged writes the configured value again.
+ */
 export function formatClaudeLimitInput(limit: number | null): string {
   const normalized = normalizeClientUsageLimit(limit);
   return normalized === null ? '' : String(normalized);

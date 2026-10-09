@@ -67,23 +67,23 @@ describe('client usage limits: write', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  test('rounds to two decimals and leaves other full-key entries as they are', async () => {
+  test('writes positive values exactly and leaves other full-key entries as they are', async () => {
     mock('get', { [LAPTOP_KEY]: 1 });
     const put = mock('put');
     await clientUsageLimitsApi.set(PHONE_ID, 0.123456);
-    expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_KEY]: 1, [PHONE_ID]: 0.12 });
-    await clientUsageLimitsApi.set('anonymous', 0.005);
-    expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_KEY]: 1, anonymous: 0.01 });
+    expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_KEY]: 1, [PHONE_ID]: 0.123456 });
+    await clientUsageLimitsApi.set('anonymous', 0.125);
+    expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_KEY]: 1, anonymous: 0.125 });
     await clientUsageLimitsApi.set(` ${PHONE_ID} `, 10);
     expect(put).toHaveBeenLastCalledWith(PATH, { [LAPTOP_KEY]: 1, [PHONE_ID]: 10 });
-    expect(normalizeClientUsageLimit(1.234)).toBe(1.23);
+    expect(normalizeClientUsageLimit(1.234)).toBe(1.234);
     expect(normalizeClientUsageLimit(2)).toBe(2);
-    for (const value of [0, 0.004, -2, NaN, Infinity, null, undefined]) {
+    for (const value of [0, -0, -2, NaN, Infinity, null, undefined, '2']) {
       expect(normalizeClientUsageLimit(value)).toBeNull();
     }
   });
 
-  test('null, 0 and values that round to 0 remove the entry', async () => {
+  test('null and 0 remove the entry; a small positive value sets it', async () => {
     const get = mock('get', { [LAPTOP_KEY]: 1, [PHONE_ID]: 0.25 });
     const put = mock('put');
     const remove = mock('delete');
@@ -91,8 +91,10 @@ describe('client usage limits: write', () => {
     expect(put).toHaveBeenLastCalledWith(PATH, { [PHONE_ID]: 0.25 });
     await clientUsageLimitsApi.set(LAPTOP_ID, 0);
     expect(put).toHaveBeenLastCalledWith(PATH, { [PHONE_ID]: 0.25 });
+    // Rounding used to turn this into "clear" and delete the allowance.
     await clientUsageLimitsApi.set(LAPTOP_ID, 0.004);
-    expect(put).toHaveBeenLastCalledWith(PATH, { [PHONE_ID]: 0.25 });
+    expect(put).toHaveBeenLastCalledWith(PATH, { [PHONE_ID]: 0.25, [LAPTOP_ID]: 0.004 });
+    expect(normalizeClientUsageLimit(Number.MIN_VALUE)).toBe(Number.MIN_VALUE);
     expect(put).toHaveBeenCalledTimes(3);
     expect(remove).not.toHaveBeenCalled();
     // Removing an entry that is not there rewrites the map unchanged.
@@ -274,8 +276,8 @@ describe('client usage limits: write', () => {
   });
 
   test('a huge value never clears an existing allowance', async () => {
-    // Rounding 1e308 to two decimals overflows to Infinity; normalizing must stay
-    // finite and idempotent so a second pass cannot turn the value into "clear".
+    // Normalizing must stay finite and idempotent so a second pass cannot turn the value
+    // into "clear" (rounding 1e308 to two decimals once overflowed to Infinity).
     expect(normalizeClientUsageLimit(1e308)).toBe(1e308);
     expect(normalizeClientUsageLimit(normalizeClientUsageLimit(1e308))).toBe(1e308);
     expect(normalizeClientUsageLimit(Number.MAX_VALUE)).toBe(Number.MAX_VALUE);
