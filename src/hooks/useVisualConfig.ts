@@ -33,6 +33,7 @@ import {
   writeVisualServer,
   validateVisualServer,
 } from '@/features/config/visualConfigServer';
+import { parseVisualRoutingStrategy } from '@/features/config/routingConfig';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -427,14 +428,7 @@ function parsePayloadProtocol(raw: unknown): string | undefined {
 }
 
 export function parseRoutingStrategy(raw: unknown): RoutingStrategy {
-  const normalized = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (['weighted-round-robin', 'weightedroundrobin', 'wrr'].includes(normalized)) {
-    return 'weighted-round-robin';
-  }
-  if (['fill-first', 'fillfirst', 'ff'].includes(normalized)) return 'fill-first';
-  return 'round-robin';
+  return parseVisualRoutingStrategy(raw);
 }
 
 export function parseDisableImageGenerationMode(raw: unknown): DisableImageGenerationMode {

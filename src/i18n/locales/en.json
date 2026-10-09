@@ -1531,6 +1531,8 @@
           "strategy_round_robin": "Round Robin",
           "strategy_weighted_round_robin": "Weighted Round Robin",
           "strategy_fill_first": "Fill First",
+          "strategy_quota_aware": "Quota Aware",
+          "strategy_quota_aware_hint": "Sends new work to the subscription most at risk of leaving weekly quota unused, and avoids credentials close to their 5h limit",
           "session_affinity_ttl": "Session Affinity TTL",
           "force_model_prefix": "Force Model Prefix",
           "force_model_prefix_desc": "Unprefixed model requests only use credentials without prefix",

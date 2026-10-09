@@ -123,7 +123,11 @@ export function SectionNetwork({
             <FieldShell
               label={t('config_management.visual.sections.network.routing_strategy')}
               labelId={routingStrategyLabelId}
-              hint={t('config_management.visual.sections.network.routing_strategy_hint')}
+              hint={t(
+                values.routingStrategy === 'quota-aware'
+                  ? 'config_management.visual.sections.network.strategy_quota_aware_hint'
+                  : 'config_management.visual.sections.network.routing_strategy_hint'
+              )}
               hintId={routingStrategyHintId}
             >
               <Select
@@ -142,6 +146,10 @@ export function SectionNetwork({
                   {
                     value: 'fill-first',
                     label: t('config_management.visual.sections.network.strategy_fill_first'),
+                  },
+                  {
+                    value: 'quota-aware',
+                    label: t('config_management.visual.sections.network.strategy_quota_aware'),
                   },
                 ]}
                 id={`${routingStrategyLabelId}-select`}

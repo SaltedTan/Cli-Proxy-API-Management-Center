@@ -1529,6 +1529,8 @@
           "strategy_round_robin": "轮询 (Round Robin)",
           "strategy_weighted_round_robin": "加权轮询 (Weighted Round Robin)",
           "strategy_fill_first": "填充优先 (Fill First)",
+          "strategy_quota_aware": "额度感知 (Quota Aware)",
+          "strategy_quota_aware_hint": "将新请求优先分配给每周额度最可能用不完的订阅，并避开接近 5 小时限额的凭据",
           "session_affinity_ttl": "会话粘性 TTL",
           "force_model_prefix": "强制模型前缀",
           "force_model_prefix_desc": "未带前缀的模型请求只使用无前缀凭据",
