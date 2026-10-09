@@ -297,6 +297,9 @@ export function ledgerPausesFromCooldowns(
  * It also stays set once every model the proxy holds a state for is cooling,
  * though the selector still picks the credential for any other model. Model
  * pauses explain it then, and hold only their own models' lanes.
+ *
+ * Newer servers say which case applies in `unavailable_reason`; older ones
+ * leave it to be inferred from the retry deadline, message and refresh state.
  */
 export function credentialBlockFromAuthFile(
   file: AuthFileItem,
@@ -307,8 +310,12 @@ export function credentialBlockFromAuthFile(
     return { reason: 'disabled', message: null };
   }
   if (file.unavailable !== true) return null;
-  if (pauses?.some((pause) => pause.scope === 'credential')) return null;
-  if (modelPausesExplainUnavailable(file, pauses)) return null;
+  const reason = file.unavailable_reason;
+  if (reason === 'models') return null;
+  if (reason !== 'auth') {
+    if (pauses?.some((pause) => pause.scope === 'credential')) return null;
+    if (reason !== 'cooldown' && modelPausesExplainUnavailable(file, pauses)) return null;
+  }
   return {
     reason: 'unavailable',
     message: hasAuthFileStatusWarning(file) ? getAuthFileStatusMessage(file) : null,
@@ -316,9 +323,10 @@ export function credentialBlockFromAuthFile(
 }
 
 /**
- * The aggregate carries the earliest model retry as `next_retry_after`; a terminal
- * unauthorized failure clears it. An expired token blocks every model whatever its
- * deadline, and shows as its message or a failing refresh.
+ * For servers without `unavailable_reason`. The aggregate carries the earliest model
+ * retry as `next_retry_after`; a terminal unauthorized failure clears it. An expired
+ * token blocks every model whatever its deadline, and shows as its message or a
+ * failing refresh.
  */
 function modelPausesExplainUnavailable(
   file: AuthFileItem,

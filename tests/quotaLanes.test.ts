@@ -407,6 +407,101 @@ describe('credential availability', () => {
     ).toBe('unavailable');
   });
 
+  describe('when the list says why it is unavailable', () => {
+    const opus: LedgerPause = {
+      scope: 'model',
+      modelKey: 'claude-opus-4-6',
+      untilMs: NOW + HOUR_MS,
+    };
+    const credentialPause: LedgerPause = {
+      scope: 'credential',
+      modelKey: null,
+      untilMs: NOW + HOUR_MS,
+    };
+    // What the proxy lists for a credential with Opus cooling: the aggregate retry
+    // deadline and the cooldown's message, whatever else is wrong with it.
+    const opusCooling = authFile({
+      unavailable: true,
+      status: 'error',
+      status_message: 'upstream request failed',
+      next_retry_after: new Date(NOW + HOUR_MS).toISOString(),
+    });
+    const opusWindow: LedgerWindow = {
+      ...sevenDay(60),
+      id: 'seven-day-opus',
+      label: 'Opus',
+      scope: 'scoped',
+      model: 'Opus',
+    };
+    const laneStatuses = (block: CredentialBlock | null) =>
+      buildQuotaLanes(
+        { plan: null, windows: [sevenDay(60), opusWindow], pauses: [opus], block },
+        NOW
+      ).map((lane) => [lane.id, lane.status]);
+
+    test('an expired token blocks every lane, though the model cooldown left a deadline', () => {
+      // The token's expiry is not in the message, and the refresh has not failed yet.
+      const block = credentialBlockFromAuthFile(
+        { ...opusCooling, unavailable_reason: 'auth' },
+        [opus]
+      );
+      expect(block).toEqual({ reason: 'unavailable', message: 'upstream request failed' });
+      expect(laneStatuses(block)).toEqual([
+        ['seven-day-opus', 'unavailable'],
+        [OTHER_MODELS_LANE_ID, 'unavailable'],
+      ]);
+      // A credential-wide pause ends, the auth failure does not.
+      expect(
+        credentialBlockFromAuthFile({ ...opusCooling, unavailable_reason: 'auth' }, [
+          credentialPause,
+        ])?.reason
+      ).toBe('unavailable');
+    });
+
+    test('a failing refresh of a still-valid token leaves the other models open', () => {
+      const file: AuthFileItem = {
+        ...opusCooling,
+        unavailable_reason: 'models',
+        refreshError: { message: 'token refresh failed: status 503', httpStatus: 503 },
+      };
+      const block = credentialBlockFromAuthFile(file, [opus]);
+      expect(block).toBeNull();
+      expect(laneStatuses(block)).toEqual([
+        ['seven-day-opus', 'partial'],
+        [OTHER_MODELS_LANE_ID, 'open'],
+      ]);
+      // Model cooldowns never block the credential, even with a terminal-sounding
+      // message or when the pauses are unknown.
+      expect(
+        credentialBlockFromAuthFile({ ...file, status_message: 'token expired' }, [opus])
+      ).toBeNull();
+      expect(credentialBlockFromAuthFile(file, null)).toBeNull();
+    });
+
+    test('a credential-wide cooldown shows as its pause, or blocks without one', () => {
+      const file: AuthFileItem = { ...opusCooling, unavailable_reason: 'cooldown' };
+      expect(credentialBlockFromAuthFile(file, [credentialPause, opus])).toBeNull();
+      // Model pauses do not explain a credential-wide cooldown.
+      expect(credentialBlockFromAuthFile(file, [opus])?.reason).toBe('unavailable');
+    });
+
+    test('without a reason, the deadline, message and refresh state still decide', () => {
+      expect(credentialBlockFromAuthFile(opusCooling, [opus])).toBeNull();
+      expect(
+        credentialBlockFromAuthFile({ ...opusCooling, refreshError: { message: 'failed' } }, [
+          opus,
+        ])?.reason
+      ).toBe('unavailable');
+      // An unrecognised reason is treated as absent.
+      expect(
+        credentialBlockFromAuthFile(
+          { ...opusCooling, unavailable_reason: 'other' as AuthFileItem['unavailable_reason'] },
+          [opus]
+        )
+      ).toBeNull();
+    });
+  });
+
   test('only the flags the selector honours block a credential', () => {
     expect(credentialBlockFromAuthFile(authFile({ status: 'active' }), [])).toBeNull();
     // The list reconciles status against the selector; error without unavailable still serves.

@@ -72,6 +72,12 @@ export interface AuthFileItem {
   runtimeOnly?: boolean | string;
   disabled?: boolean;
   unavailable?: boolean;
+  /**
+   * Why `unavailable` is set: `auth` (a persistent auth failure) and `cooldown`
+   * (a credential-wide cooldown) refuse every model; `models` means only the
+   * models with a recorded cooldown are refused. Absent on older servers.
+   */
+  unavailable_reason?: 'auth' | 'cooldown' | 'models';
   status?: string;
   statusMessage?: string;
   lastRefresh?: string | number;
