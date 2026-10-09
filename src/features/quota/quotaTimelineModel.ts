@@ -480,16 +480,28 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
   if (provider === 'antigravity') {
     // Buckets live one level down, inside groups, and the groups are a display
     // concern the chart doesn't care about — flatten them.
-    const buckets = ((quota as { groups?: { buckets?: AntigravityBucketLike[] }[] }).groups ?? [])
+    // Resets are on the upstream's clock; like the ledger, move them onto the browser's,
+    // which the chart draws against.
+    const { groups, serverTimeOffsetMs } = quota as {
+      groups?: { buckets?: AntigravityBucketLike[] }[];
+      serverTimeOffsetMs?: number | null;
+    };
+    const offsetMs =
+      typeof serverTimeOffsetMs === 'number' && Number.isFinite(serverTimeOffsetMs)
+        ? serverTimeOffsetMs
+        : 0;
+    const buckets = (groups ?? [])
       .flatMap((group) => group.buckets ?? [])
-      .filter((bucket) => typeof bucket.resetAtMs === 'number');
+      .filter((bucket) => typeof bucket.resetAtMs === 'number')
+      .map((bucket) => ({ ...bucket, resetAtMs: (bucket.resetAtMs as number) - offsetMs }));
     const chosen = pickLaneWindow(buckets, maxPeriodHours);
     if (!chosen) return empty;
 
-    // Antigravity reports the fraction REMAINING, not percent used.
+    // Antigravity reports the fraction REMAINING, not percent used. Unrounded: 0.4% left
+    // is not used up; only display rounds.
     const remainingOf = (bucket: AntigravityBucketLike) =>
       typeof bucket.remainingFraction === 'number'
-        ? clampPercent(Math.round(bucket.remainingFraction * 100))
+        ? clampPercent(bucket.remainingFraction * 100)
         : null;
 
     return {
@@ -512,7 +524,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
 
     // Kimi reports raw counts; remaining is derived.
     const remainingOf = (row: KimiRowLike) =>
-      row.limit > 0 ? clampPercent(Math.round(((row.limit - row.used) / row.limit) * 100)) : null;
+      row.limit > 0 ? clampPercent(((row.limit - row.used) / row.limit) * 100) : null;
 
     return {
       ...empty,

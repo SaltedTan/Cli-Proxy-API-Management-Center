@@ -113,6 +113,40 @@ describe('QuotaTimeline rendering', () => {
     expect(markup).not.toContain('role="status"');
   });
 
+  test('shows a sliver of remaining quota as the ledger does, not as used up', () => {
+    const now = new Date(2026, 6, 29, 12).getTime();
+    const markup = renderToStaticMarkup(
+      createElement(QuotaTimeline, {
+        entries: [{ file: { name: 'ag.json', type: 'antigravity' }, type: 'antigravity' }],
+        displayNameFor: (name: string) => name,
+        resolvedTheme: 'light',
+        now,
+        quotaFor: () => ({
+          status: 'success',
+          serverTimeOffsetMs: 0,
+          groups: [
+            {
+              id: 'gemini',
+              label: 'Gemini',
+              buckets: [
+                {
+                  id: 'weekly',
+                  label: 'Weekly',
+                  remainingFraction: 0.004,
+                  resetAtMs: now + 2 * 24 * 3_600_000,
+                  periodHours: 168,
+                },
+              ],
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(markup).toContain('<b>&lt;1%</b>');
+    expect(markup).not.toContain('<b>0%</b>');
+  });
+
   test('renders an unexpired Codex reset credit as an expiry tick', () => {
     const markup = renderToStaticMarkup(
       createElement(QuotaTimeline, {

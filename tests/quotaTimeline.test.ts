@@ -13,6 +13,7 @@ import {
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
 import type { TimelineLane } from '../src/features/quota/quotaTimelineModel';
+import { buildAntigravityLedger } from '../src/features/quota/providers/antigravity/ledger';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).getTime();
 
@@ -399,6 +400,48 @@ describe('buildTimelineLane', () => {
       { label: '5h', remaining: 40 },
       { label: 'Weekly', remaining: 82 },
     ]);
+  });
+
+  test('antigravity and kimi agree with the ledger: unrounded, resets on the browser clock', () => {
+    const quota = {
+      status: 'success' as const,
+      // The upstream clock runs an hour ahead of the browser.
+      serverTimeOffsetMs: HOUR_MS,
+      groups: [
+        {
+          id: 'gemini',
+          label: 'Gemini',
+          buckets: [
+            {
+              id: 'session',
+              label: 'Session',
+              remainingFraction: 0.004,
+              resetAtMs: 3 * HOUR_MS,
+              periodHours: 5,
+            },
+          ],
+        },
+      ],
+    };
+    const [window] = buildAntigravityLedger(quota, ((key: string) => key) as never).windows;
+    const lane = buildTimelineLane({ ...base, provider: 'antigravity', quota });
+    // 0.4% left is not used up.
+    expect(lane.remaining).toBe(window.remaining);
+    expect(lane.remaining).toBeCloseTo(0.4, 10);
+    expect(lane.limits).toEqual([{ label: 'Session', remaining: lane.remaining as number }]);
+    // The offset is applied once, as in the ledger.
+    expect(lane.anchorMs).toBe(window.resetAtMs);
+    expect(lane.anchorMs).toBe(2 * HOUR_MS);
+
+    const kimi = buildTimelineLane({
+      ...base,
+      provider: 'kimi',
+      quota: {
+        status: 'success',
+        rows: [{ label: 'Daily', used: 999, limit: 1000, resetAtMs: 5000, periodHours: 24 }],
+      },
+    });
+    expect(kimi.remaining).toBeCloseTo(0.1, 10);
   });
 
   test('antigravity buckets without a parseable reset do not anchor the lane', () => {
