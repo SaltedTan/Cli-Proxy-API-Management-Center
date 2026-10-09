@@ -9,6 +9,10 @@
  * how many credentials could serve the model now, and whether any is projected
  * to stop before its refill. Other secondary windows fold behind a toggle — the
  * strip is for orientation, the ledger below is for detail.
+ *
+ * Credentials the proxy will not select (disabled, or unavailable for a reason
+ * other than a pause) are counted on their own line: their quota stays in the
+ * pool as information, but none of it can be spent now.
  */
 
 import { useState } from 'react';
@@ -31,6 +35,8 @@ import styles from './QuotaSummaryStrip.module.scss';
 export interface QuotaSummaryGroup {
   provider: QuotaProviderType;
   summary: ProviderSummary;
+  /** Credentials the proxy will not select, loaded or not. */
+  unavailable?: number;
 }
 
 export interface QuotaSummaryStripProps {
@@ -134,6 +140,13 @@ function SummaryCell({
           </span>
         ))}
       </div>
+
+      {(group.unavailable ?? 0) > 0 && (
+        <div className={styles.unavailable}>
+          <span className={`${styles.mark} ${styles.markClosed}`} aria-hidden="true" />
+          {t('quota_management.summary_unavailable', { count: group.unavailable })}
+        </div>
+      )}
 
       {headline?.nextResetMs != null && (
         <ResetLine atMs={headline.nextResetMs} now={now} locale={i18n.resolvedLanguage} />

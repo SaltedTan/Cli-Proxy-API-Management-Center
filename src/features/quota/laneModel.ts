@@ -14,15 +14,21 @@
  * different windows are never blended (41% of the 7-day limit is not 41% of
  * Fable), so a lane names the window that decides it instead.
  *
+ * Quota is not the only gate: the proxy never selects a disabled credential or
+ * one it marked unavailable (CLIProxyAPI's isAuthBlockedForModel), whatever its
+ * cached quota says. Such a lane is unavailable, and its quota stays readable.
+ *
  * Pure and clock-free like paceModel.ts: `nowMs` is always passed in.
  */
 
-import type { AuthFileCooldownSnapshot } from '@/types/authFile';
+import { getAuthFileStatusMessage, hasAuthFileStatusWarning } from '@/features/authFiles/constants';
+import type { AuthFileCooldownSnapshot, AuthFileItem } from '@/types/authFile';
+import { isDisabledAuthFile } from '@/utils/quota/validators';
 import { MINUTE_MS } from '@/utils/time/durations';
-import type { LedgerPause, LedgerSnapshot, LedgerWindow } from './ledgerModel';
+import type { CredentialBlock, LedgerPause, LedgerSnapshot, LedgerWindow } from './ledgerModel';
 import { computeWindowPace } from './paceModel';
 
-export type LaneStatus = 'open' | 'tight' | 'closed' | 'unknown';
+export type LaneStatus = 'open' | 'tight' | 'closed' | 'unavailable' | 'unknown';
 
 /** Lane id for every model without a limit of its own. */
 export const OTHER_MODELS_LANE_ID = 'other-models';
@@ -50,6 +56,8 @@ export interface QuotaLane {
   reopenAtMs: number | null;
   /** The proxy pause that holds this lane, if any. */
   pause: LedgerPause | null;
+  /** Unavailable: why the proxy will not select the credential at all. */
+  block: CredentialBlock | null;
 }
 
 export interface LaneColumn {
@@ -98,9 +106,13 @@ function decideLane(
   own: LedgerWindow,
   gates: readonly LedgerWindow[],
   pause: LedgerPause | null,
+  block: CredentialBlock | null,
   nowMs: number
 ): QuotaLane {
-  const base = { id, model, own, pause, runoutAtMs: null, reopenAtMs: null };
+  const base = { id, model, own, pause, block, runoutAtMs: null, reopenAtMs: null };
+
+  // Nothing reopens a credential the proxy will not select; its quota is moot.
+  if (block) return { ...base, status: 'unavailable', gate: own };
 
   const empty = gates.filter((gate) => gate.remaining !== null && gate.remaining <= 0);
   if (empty.length > 0 || pause) {
@@ -153,6 +165,7 @@ export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaL
         window,
         [...account, window],
         pauseFor(window.model ?? null, snapshot.pauses, nowMs),
+        snapshot.block ?? null,
         nowMs
       )
     );
@@ -170,6 +183,7 @@ export function buildQuotaLanes(snapshot: LedgerSnapshot, nowMs: number): QuotaL
         longest,
         account,
         pauseFor(null, snapshot.pauses, nowMs),
+        snapshot.block ?? null,
         nowMs
       )
     );
@@ -206,4 +220,28 @@ export function ledgerPausesFromCooldowns(
       modelKey: record.scope === 'model' ? (record.modelKey ?? null) : null,
       untilMs: snapshot.receivedAtMs + record.remainingSeconds * 1000,
     }));
+}
+
+/**
+ * Whether the proxy refuses the credential outright, from the auth-file list.
+ *
+ * The list reconciles `unavailable` against the selector: it stays set for a
+ * persistent authentication failure (an expired or rejected token) and for an
+ * active credential-wide cooldown. The cooldown already shows as a pause with
+ * an end, so only an unavailable credential without one counts as blocked.
+ */
+export function credentialBlockFromAuthFile(
+  file: AuthFileItem,
+  pauses: readonly LedgerPause[]
+): CredentialBlock | null {
+  const status = typeof file.status === 'string' ? file.status.trim().toLowerCase() : '';
+  if (isDisabledAuthFile(file) || status === 'disabled') {
+    return { reason: 'disabled', message: null };
+  }
+  if (file.unavailable !== true) return null;
+  if (pauses.some((pause) => pause.scope === 'credential')) return null;
+  return {
+    reason: 'unavailable',
+    message: hasAuthFileStatusWarning(file) ? getAuthFileStatusMessage(file) : null,
+  };
 }

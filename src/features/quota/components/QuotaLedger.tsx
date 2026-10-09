@@ -14,6 +14,9 @@
  * swaps window columns for lanes — one per model, plus one for every other
  * model — that say whether the credential can serve the model now and which
  * window decides it (laneModel.ts). Every raw window stays on the row as a chip.
+ *
+ * A credential the proxy will not select says so beside its name, apart from
+ * its quota: the cached windows stay on the row, but its lanes are unavailable.
  */
 
 import { useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
@@ -34,6 +37,7 @@ import {
   approximateInstant,
   buildLaneColumns,
   buildQuotaLanes,
+  credentialBlockFromAuthFile,
   hasModelLanes,
   ledgerPausesFromCooldowns,
   type LaneColumn,
@@ -221,9 +225,18 @@ function LedgerRow({
       : 0;
   const canExpand = status === 'success' || status === 'error';
   const isExpanded = expanded && canExpand;
-  const credentialPause = ledgerPausesFromCooldowns(file.cooldownSnapshot)
+  const pauses = ledgerPausesFromCooldowns(file.cooldownSnapshot);
+  const credentialPause = pauses
     .filter((pause) => pause.scope === 'credential' && pause.untilMs > now)
     .reduce<number | null>((latest, pause) => Math.max(latest ?? 0, pause.untilMs), null);
+  const block = credentialBlockFromAuthFile(file, pauses);
+  const blockText = !block
+    ? null
+    : block.reason === 'disabled'
+      ? t('quota_management.ledger_disabled')
+      : block.message
+        ? t('quota_management.ledger_unavailable_message', { message: block.message })
+        : t('quota_management.ledger_unavailable');
 
   return (
     <li className={lanes ? `${styles.row} ${styles.laneRow}` : styles.row}>
@@ -232,6 +245,11 @@ function LedgerRow({
           {displayName}
         </span>
         {snapshot?.plan && <span className={styles.plan}>{snapshot.plan}</span>}
+        {blockText && (
+          <span className={styles.paused} title={blockText}>
+            {blockText}
+          </span>
+        )}
         {credentialPause !== null && (
           <span className={styles.paused}>
             {t('quota_management.ledger_paused_until', {
@@ -460,6 +478,7 @@ function LaneCell({
     open: styles.statusOpen,
     tight: styles.statusTight,
     closed: styles.statusClosed,
+    unavailable: styles.statusClosed,
     unknown: styles.statusUnknown,
   }[lane.status];
 
@@ -485,7 +504,7 @@ function LaneCell({
           <span className={styles.laneAside}>{at(lane.reopenAtMs)}</span>
         </>
       );
-  } else if (own.resetAtMs !== null && own.resetAtMs > now) {
+  } else if (lane.status !== 'unavailable' && own.resetAtMs !== null && own.resetAtMs > now) {
     // "Lasts" is a projection, so it waits until the cycle is far enough along to make one.
     const ownPace = computeWindowPace(own, now);
     foot =
@@ -529,6 +548,9 @@ function LaneCell({
         {knownPace && <PaceMark pace={knownPace} classes={paceStyles} />}
       </div>
       {foot && <div className={styles.laneFoot}>{foot}</div>}
+      {lane.status === 'unavailable' && (
+        <div className={styles.laneNote}>{t('quota_management.lane_unavailable_note')}</div>
+      )}
       {lane.pause?.scope === 'model' && (
         <div className={styles.laneNote}>
           {t('quota_management.lane_pause_model', { model: title })}

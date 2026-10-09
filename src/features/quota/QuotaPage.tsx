@@ -38,7 +38,7 @@ import {
   type QuotaTabId,
   type QuotaViewMode,
 } from './constants';
-import { ledgerPausesFromCooldowns } from './laneModel';
+import { credentialBlockFromAuthFile, ledgerPausesFromCooldowns } from './laneModel';
 import { summarizeProvider, type LedgerSnapshot } from './ledgerModel';
 import { maskEmailsInText } from './maskEmail';
 import {
@@ -232,16 +232,19 @@ export function QuotaPage() {
   );
 
   /* ---------- 账本快照 / 提供商汇总 ----------
-   * 快照并入代理的冷却（暂停）：车道据此区分「仅暂停某模型」与「整个账号被暂停」。 */
+   * 快照并入代理的冷却（暂停）：车道据此区分「仅暂停某模型」与「整个账号被暂停」。
+   * 也并入凭证本身的可用性：代理不会选用已停用或不可用的凭证，缓存的额度仅供参考。 */
 
   const ledgerSnapshots = useMemo(() => {
     const snapshots = new Map<string, LedgerSnapshot>();
     entries.forEach((entry) => {
       const quota = quotaByType[entry.type][getQuotaCacheKey(entry.file)];
       if (quota?.status === 'success') {
+        const pauses = ledgerPausesFromCooldowns(entry.file.cooldownSnapshot);
         snapshots.set(entryKey(entry), {
           ...QUOTA_ADAPTERS[entry.type].ledger(quota, t),
-          pauses: ledgerPausesFromCooldowns(entry.file.cooldownSnapshot),
+          pauses,
+          block: credentialBlockFromAuthFile(entry.file, pauses),
         });
       }
     });
@@ -256,10 +259,22 @@ export function QuotaPage() {
   // 汇总当前 tab + 搜索范围内的全部凭证（不受分页影响）。
   const summaryGroups = useMemo<QuotaSummaryGroup[]>(
     () =>
-      QUOTA_TAB_ORDER.map((provider) => {
+      QUOTA_TAB_ORDER.map((provider): QuotaSummaryGroup | null => {
         const providerEntries = filteredEntries.filter((entry) => entry.type === provider);
         if (providerEntries.length === 0) return null;
-        return { provider, summary: summarizeProvider(providerEntries.map(snapshotFor), now) };
+        // 已加载与未加载的凭证都计入：不可用与额度是否加载无关。
+        const unavailable = providerEntries.filter(
+          (entry) =>
+            credentialBlockFromAuthFile(
+              entry.file,
+              ledgerPausesFromCooldowns(entry.file.cooldownSnapshot)
+            ) !== null
+        ).length;
+        return {
+          provider,
+          summary: summarizeProvider(providerEntries.map(snapshotFor), now),
+          unavailable,
+        };
       }).filter((group): group is QuotaSummaryGroup => group !== null),
     [filteredEntries, snapshotFor, now]
   );

@@ -8,11 +8,19 @@ import {
   approximateInstant,
   buildLaneColumns,
   buildQuotaLanes,
+  credentialBlockFromAuthFile,
   hasModelLanes,
   ledgerPausesFromCooldowns,
   type QuotaLane,
 } from '@/features/quota/laneModel';
-import type { LedgerPause, LedgerSnapshot, LedgerWindow } from '@/features/quota/ledgerModel';
+import {
+  summarizeProvider,
+  type CredentialBlock,
+  type LedgerPause,
+  type LedgerSnapshot,
+  type LedgerWindow,
+} from '@/features/quota/ledgerModel';
+import type { AuthFileItem } from '@/types/authFile';
 import { DAY_MS, HOUR_MS, MINUTE_MS } from '@/utils/time/durations';
 
 const NOW = new Date(2026, 9, 6, 14, 20).getTime();
@@ -203,6 +211,76 @@ describe('lane columns', () => {
     expect(hasModelLanes(snapshot([sevenDay(60), { ...fable(40), model: null }]))).toBe(false);
     expect(hasModelLanes(snapshot([sevenDay(60)]))).toBe(false);
     expect(hasModelLanes(null)).toBe(false);
+  });
+});
+
+describe('credential availability', () => {
+  const tokenExpired: CredentialBlock = { reason: 'unavailable', message: 'token expired' };
+  const authFile = (overrides: Partial<AuthFileItem>): AuthFileItem => ({
+    name: 'claude-a.json',
+    type: 'claude',
+    ...overrides,
+  });
+
+  test('an unavailable credential without a pause is blocked, with its message', () => {
+    expect(
+      credentialBlockFromAuthFile(
+        authFile({ unavailable: true, status: 'error', status_message: 'token expired' }),
+        []
+      )
+    ).toEqual(tokenExpired);
+    // A healthy-sounding message is not worth repeating.
+    expect(
+      credentialBlockFromAuthFile(authFile({ unavailable: true, statusMessage: 'ok' }), [])
+    ).toEqual({ reason: 'unavailable', message: null });
+  });
+
+  test('a disabled credential is blocked', () => {
+    expect(credentialBlockFromAuthFile(authFile({ disabled: true }), [])).toEqual({
+      reason: 'disabled',
+      message: null,
+    });
+    expect(credentialBlockFromAuthFile(authFile({ status: ' DISABLED ' }), [])).toEqual({
+      reason: 'disabled',
+      message: null,
+    });
+  });
+
+  test('a credential-wide cooldown explains unavailable: it shows as a pause instead', () => {
+    const pause: LedgerPause = { scope: 'credential', modelKey: null, untilMs: NOW + HOUR_MS };
+    expect(
+      credentialBlockFromAuthFile(authFile({ unavailable: true, status: 'error' }), [pause])
+    ).toBeNull();
+  });
+
+  test('only the flags the selector honours block a credential', () => {
+    expect(credentialBlockFromAuthFile(authFile({ status: 'active' }), [])).toBeNull();
+    // The list reconciles status against the selector; error without unavailable still serves.
+    expect(credentialBlockFromAuthFile(authFile({ status: 'error' }), [])).toBeNull();
+    expect(
+      credentialBlockFromAuthFile(authFile({ statusMessage: 'refresh token rejected' }), [])
+    ).toBeNull();
+  });
+
+  test('a blocked credential has no open lane, but keeps its cached quota visible', () => {
+    const lanes = buildQuotaLanes(
+      { ...snapshot([sevenDay(80), fiveHour(90), fable(70)]), block: tokenExpired },
+      NOW
+    );
+    expect(lanes.map((lane) => lane.status)).toEqual(['unavailable', 'unavailable']);
+    for (const lane of lanes) {
+      expect(lane).toMatchObject({ block: tokenExpired, reopenAtMs: null, runoutAtMs: null });
+      expect(lane.gate).toBe(lane.own);
+    }
+    expect(lanes[0].gate.remaining).toBe(70);
+  });
+
+  test('a blocked credential does not count as serving in the summary', () => {
+    const healthy = snapshot([sevenDay(80), fiveHour(90), fable(70)], []);
+    const summary = summarizeProvider([healthy, { ...healthy, block: tokenExpired }], NOW);
+    expect(summary.models[0]).toMatchObject({ carrying: 2, serving: 1 });
+    // The cached quota still pools as information.
+    expect(summary.models[0].line.totalRemaining).toBe(140);
   });
 });
 

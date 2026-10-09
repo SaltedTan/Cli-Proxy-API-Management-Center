@@ -112,6 +112,21 @@ describe('QuotaSummaryStrip', () => {
     expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
   });
 
+  test('counts credentials the proxy will not select on a line of their own', () => {
+    const summary = summarizeProvider([null, null], NOW);
+    const render = (unavailable?: number) =>
+      renderToStaticMarkup(
+        createElement(QuotaSummaryStrip, {
+          groups: [{ provider: 'claude', summary, unavailable }],
+          resolvedTheme: 'light',
+          now: NOW,
+        })
+      );
+    expect(render(2)).toContain('2 credentials unavailable to the proxy');
+    expect(render(0)).not.toContain('unavailable to the proxy');
+    expect(render()).not.toContain('unavailable to the proxy');
+  });
+
   test('says when a provider has nothing loaded yet', () => {
     const markup = renderToStaticMarkup(
       createElement(QuotaSummaryStrip, {
@@ -181,8 +196,15 @@ describe('ledger source contracts', () => {
     expect(stacked).toContain('.laneRow .identity {');
   });
 
-  test('page joins the proxy pauses into ledger snapshots', () => {
-    expect(page).toContain('pauses: ledgerPausesFromCooldowns(entry.file.cooldownSnapshot)');
+  test('page joins the proxy pauses and credential availability into ledger snapshots', () => {
+    expect(page).toContain('const pauses = ledgerPausesFromCooldowns(entry.file.cooldownSnapshot)');
+    expect(page).toContain('block: credentialBlockFromAuthFile(entry.file, pauses)');
+  });
+
+  test('ledger rows name a credential the proxy will not select', () => {
+    expect(ledger).toContain('credentialBlockFromAuthFile(file, pauses)');
+    expect(ledger).toContain("t('quota_management.ledger_unavailable_message'");
+    expect(ledger).toContain("t('quota_management.lane_unavailable_note')");
   });
 
   test('page defaults to the ledger and masks emails until asked', () => {
@@ -201,6 +223,11 @@ describe('lane locale keys', () => {
     'lane_status_tight',
     'lane_status_closed',
     'lane_status_unknown',
+    'lane_status_unavailable',
+    'lane_unavailable_note',
+    'ledger_disabled',
+    'ledger_unavailable',
+    'ledger_unavailable_message',
     'lane_runs_out_before',
     'lane_used_up',
     'lane_lasts',

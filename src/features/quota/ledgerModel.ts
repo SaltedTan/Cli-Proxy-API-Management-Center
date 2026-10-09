@@ -50,12 +50,25 @@ export interface LedgerPause {
   untilMs: number;
 }
 
+/**
+ * Why the proxy will not select the credential at all, apart from a pause: it
+ * is disabled, or the proxy marked it unavailable (an expired or rejected
+ * token, say). Its cached quota stays readable, but it serves nothing.
+ */
+export interface CredentialBlock {
+  reason: 'disabled' | 'unavailable';
+  /** The proxy's status message, when it gave a meaningful one. */
+  message: string | null;
+}
+
 export interface LedgerSnapshot {
   plan: string | null;
   /** Headline window first. */
   windows: LedgerWindow[];
   /** The proxy's active pauses on this credential; joined in from the auth-file list. */
   pauses?: LedgerPause[];
+  /** Set when the proxy will not select the credential; joined in from the auth-file list. */
+  block?: CredentialBlock | null;
 }
 
 export const EMPTY_LEDGER: LedgerSnapshot = { plan: null, windows: [] };
@@ -155,7 +168,10 @@ export interface ProviderModelSummary {
   model: string;
   /** Loaded credentials that carry this model's limit. */
   carrying: number;
-  /** Of those, how many could serve the model right now (lane open or running short). */
+  /**
+   * Of those, how many could serve the model right now (lane open or running
+   * short). An unavailable credential or an unknown lane never counts.
+   */
   serving: number;
   /** Of those, how many are projected to stop before their refill. */
   short: number;
