@@ -86,4 +86,16 @@ describe('quota listing loader', () => {
     await backgroundDone;
     expect(state.files).toEqual(['fresh']);
   });
+
+  test('a successful background load clears an earlier listing error', async () => {
+    const { load, state } = setup();
+    await load(async () => {
+      throw new Error('listing unavailable');
+    });
+    expect(state.error).toBe('listing unavailable');
+
+    await load(async () => ['fresh'], true);
+    expect(state.files).toEqual(['fresh']);
+    expect(state.error).toBe('');
+  });
 });

@@ -47,6 +47,7 @@ export function createListingLoader(): ListingLoader {
       const result = await request.fetch();
       if (!isCurrent()) return;
       request.commit(result);
+      request.setError('');
     } catch (err: unknown) {
       if (!isCurrent() || !foreground) return;
       request.setError(request.errorMessage(err));
