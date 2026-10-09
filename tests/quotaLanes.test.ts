@@ -441,10 +441,9 @@ describe('credential availability', () => {
 
     test('an expired token blocks every lane, though the model cooldown left a deadline', () => {
       // The token's expiry is not in the message, and the refresh has not failed yet.
-      const block = credentialBlockFromAuthFile(
-        { ...opusCooling, unavailable_reason: 'auth' },
-        [opus]
-      );
+      const block = credentialBlockFromAuthFile({ ...opusCooling, unavailable_reason: 'auth' }, [
+        opus,
+      ]);
       expect(block).toEqual({ reason: 'unavailable', message: 'upstream request failed' });
       expect(laneStatuses(block)).toEqual([
         ['seven-day-opus', 'unavailable'],
@@ -478,6 +477,18 @@ describe('credential availability', () => {
       expect(credentialBlockFromAuthFile(file, null)).toBeNull();
     });
 
+    test('a model refused without a timer keeps the credential blocked', () => {
+      // The proxy lists no cooldown for a disabled model or an untimed model
+      // failure, so nothing would show which lane it holds.
+      const file: AuthFileItem = {
+        ...opusCooling,
+        unavailable_reason: 'models',
+        next_retry_after: undefined,
+      };
+      expect(credentialBlockFromAuthFile(file, [])?.reason).toBe('unavailable');
+      expect(credentialBlockFromAuthFile(file, [credentialPause])?.reason).toBe('unavailable');
+    });
+
     test('a credential-wide cooldown shows as its pause, or blocks without one', () => {
       const file: AuthFileItem = { ...opusCooling, unavailable_reason: 'cooldown' };
       expect(credentialBlockFromAuthFile(file, [credentialPause, opus])).toBeNull();
@@ -488,9 +499,8 @@ describe('credential availability', () => {
     test('without a reason, the deadline, message and refresh state still decide', () => {
       expect(credentialBlockFromAuthFile(opusCooling, [opus])).toBeNull();
       expect(
-        credentialBlockFromAuthFile({ ...opusCooling, refreshError: { message: 'failed' } }, [
-          opus,
-        ])?.reason
+        credentialBlockFromAuthFile({ ...opusCooling, refreshError: { message: 'failed' } }, [opus])
+          ?.reason
       ).toBe('unavailable');
       // An unrecognised reason is treated as absent.
       expect(

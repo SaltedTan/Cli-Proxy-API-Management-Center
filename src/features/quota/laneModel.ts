@@ -311,8 +311,13 @@ export function credentialBlockFromAuthFile(
   }
   if (file.unavailable !== true) return null;
   const reason = file.unavailable_reason;
-  if (reason === 'models') return null;
-  if (reason !== 'auth') {
+  if (reason === 'models') {
+    // Model pauses hold only their own lanes. A model refused without a timer
+    // (a disabled model, a failure with no retry time) has no pause to show, so
+    // a reported pause list without a model pause keeps the credential blocked
+    // rather than opening every lane. Unreported pauses already read unknown.
+    if (pauses === null || pauses.some((pause) => pause.scope === 'model')) return null;
+  } else if (reason !== 'auth') {
     if (pauses?.some((pause) => pause.scope === 'credential')) return null;
     if (reason !== 'cooldown' && modelPausesExplainUnavailable(file, pauses)) return null;
   }
