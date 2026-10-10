@@ -41,7 +41,7 @@ export interface LedgerWindow {
   /**
    * What this window's 100% is worth when pooled across credentials, in the
    * provider's unit: Claude's 5-hour limit counts Pro sessions, so a Max 20x
-   * window weighs 20, and its 7-day limit Pro weeks, where it weighs 10.
+   * window weighs 20, and its 7-day and Fable limits Pro weeks, where it weighs 10.
    * Absent = unweighted, pooled as 100% like every other.
    */
   weight?: number;

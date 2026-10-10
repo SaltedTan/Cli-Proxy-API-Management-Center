@@ -337,6 +337,45 @@ describe('QuotaSummaryStrip', () => {
       expect(usedUp).not.toContain('used up');
     });
 
+    test('pools the Fable limit in Pro weeks, as the proxy does', () => {
+      const withFable = (planType: string, fableLeft: number, weeklyUsed = 30) => {
+        const quota = claude(planType, 50, true, weeklyUsed);
+        const fable: ClaudeQuotaWindow = {
+          id: 'seven-day-fable',
+          label: '7-day Fable',
+          labelKey: 'claude_quota.seven_day_model',
+          labelParams: { model: 'Fable' },
+          scope: 'scoped',
+          model: 'Fable',
+          usedPercent: 100 - fableLeft,
+          resetLabel: '-',
+          resetAtMs: NOW + DAY_MS,
+          periodHours: 168,
+        };
+        return { ...quota, windows: [...(quota.windows ?? []), fable] };
+      };
+      /** The cell's markup from the Fable block on; the folded lines below it carry no notes. */
+      const fableBlock = (markup: string) => markup.slice(markup.indexOf('7-day Fable'));
+
+      // Pro 70% + Max 20x 20% of their Fable = 70 + 200 of 100 + 1000.
+      const block = fableBlock(render(withFable('plan_pro', 70), withFable('plan_max20', 20)));
+      expect(block).toContain('<span>270%</span>');
+      expect(block).toContain('of 1100%');
+      expect(block).toContain(
+        'aria-label="270% of 1100% remaining across 2 credentials, in Pro weekly units"'
+      );
+      expect(block).toMatch(/flex-grow:1"><span[^>]*width:70%.*flex-grow:10"><span[^>]*width:20%/);
+      expect(block).toContain('In Pro units: Pro 100% · Team 125% · Max 5x 500% · Max 20x 1000%');
+
+      // A subscription out of its week has none of its Fable to spend, and the block says so.
+      const blocked = fableBlock(
+        render(withFable('plan_pro', 70), withFable('plan_max20', 20, 100))
+      );
+      expect(blocked).toContain('<span>70%</span>');
+      expect(blocked).toMatch(/flex-grow:10"><span[^>]*width:0%/);
+      expect(blocked).toContain('1 has used up its 7-day limit');
+    });
+
     test('says how many credentials it counted as Pro for want of a plan', () => {
       const markup = render(
         claude(null, 40),

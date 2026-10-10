@@ -13,7 +13,9 @@ import type { LedgerSnapshot, LedgerWindow } from '../../ledgerModel';
 const CLAUDE_HEADLINE_ORDER = ['seven-day', 'five-hour'] as const;
 
 export const CLAUDE_SESSION_WINDOW_ID = 'five-hour';
-export const CLAUDE_WEEKLY_WINDOW_ID = 'seven-day';
+const CLAUDE_WEEKLY_WINDOW_ID = 'seven-day';
+/** The Fable limit's id, from either payload shape (see data.ts). */
+const CLAUDE_FABLE_WINDOW_ID = 'seven-day-fable';
 
 /**
  * Each plan's 5-hour (session) limit in Pro sessions, keyed by the plan type
@@ -29,9 +31,11 @@ export const CLAUDE_SESSION_PRO_UNITS: ReadonlyMap<string, number> = new Map([
 
 /**
  * Each plan's weekly allowance in Pro weeks, which weighs the account-wide 7-day
- * limit as the proxy's weekly figure does. These are not the session ratios: a
- * Max 20x week is about ten Pro weeks, though its session is twenty. Keep in step
- * with ProUnits in the backend's internal/claudeplan.
+ * limit and the Fable limit as the proxy's weekly and Fable figures do (assuming,
+ * as the proxy does, that a plan's Fable allowance scales like its week). These
+ * are not the session ratios: a Max 20x week is about ten Pro weeks, though its
+ * session is twenty. Keep in step with ProUnits in the backend's
+ * internal/claudeplan. Other model limits (Opus, Sonnet) pool unweighted.
  */
 export const CLAUDE_WEEKLY_PRO_UNITS: ReadonlyMap<string, number> = new Map([
   ['plan_pro', 1],
@@ -44,6 +48,7 @@ export const CLAUDE_WEEKLY_PRO_UNITS: ReadonlyMap<string, number> = new Map([
 const CLAUDE_PRO_UNITS_BY_WINDOW: ReadonlyMap<string, ReadonlyMap<string, number>> = new Map([
   [CLAUDE_SESSION_WINDOW_ID, CLAUDE_SESSION_PRO_UNITS],
   [CLAUDE_WEEKLY_WINDOW_ID, CLAUDE_WEEKLY_PRO_UNITS],
+  [CLAUDE_FABLE_WINDOW_ID, CLAUDE_WEEKLY_PRO_UNITS],
 ]);
 
 /**
@@ -60,10 +65,10 @@ const planWeight = (
 
 /**
  * A weighted window's scale as shown beside its pool: `Pro 100% · Team 125% · …`,
- * per 7-day limit for the weekly pool and per session otherwise.
+ * per session for the 5-hour pool and per week for the weekly ones.
  */
 export const formatClaudeProUnitsScale = (t: TFunction, windowId: string): string =>
-  [...(windowId === CLAUDE_WEEKLY_WINDOW_ID ? CLAUDE_WEEKLY_PRO_UNITS : CLAUDE_SESSION_PRO_UNITS)]
+  [...(windowId === CLAUDE_SESSION_WINDOW_ID ? CLAUDE_SESSION_PRO_UNITS : CLAUDE_WEEKLY_PRO_UNITS)]
     .map(([planType, units]) => `${t(`claude_quota.${planType}`)} ${units * 100}%`)
     .join(' · ');
 

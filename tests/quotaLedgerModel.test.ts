@@ -758,25 +758,29 @@ describe('provider ledger extractors', () => {
       }
     });
 
-    test('leaves model-scoped weekly windows unweighted', () => {
+    test('weights the Fable limit in Pro weeks and leaves other model limits unweighted', () => {
+      const modelWindow = (id: string, model: string) => ({
+        id,
+        label: `7-day ${model}`,
+        scope: 'scoped' as const,
+        model,
+        usedPercent: 20,
+        resetLabel: '-',
+        resetAtMs: NOW + DAY_MS,
+        periodHours: 168,
+      });
       const quota = claudeQuota('plan_max20');
       quota.windows = [
         ...(quota.windows ?? []),
-        {
-          id: 'seven-day-fable',
-          label: '7-day Fable',
-          scope: 'scoped',
-          model: 'Fable',
-          usedPercent: 20,
-          resetLabel: '-',
-          resetAtMs: NOW + DAY_MS,
-          periodHours: 168,
-        },
+        modelWindow('seven-day-fable', 'Fable 5.1'),
+        modelWindow('seven-day-opus', 'Opus'),
       ];
-      const fable = buildClaudeLedger(quota, i18n.t).windows.find(
-        (window) => window.id === 'seven-day-fable'
-      );
-      expect(fable && 'weight' in fable).toBe(false);
+      const windows = buildClaudeLedger(quota, i18n.t).windows;
+      const fable = windows.find((window) => window.id === 'seven-day-fable');
+      const opus = windows.find((window) => window.id === 'seven-day-opus');
+      // As the proxy's Fable figure: a Max 20x Fable allowance is ten Pro weeks.
+      expect(fable?.weight).toBe(10);
+      expect(opus && 'weight' in opus).toBe(false);
     });
 
     test('two Pro, a Max 5x and a Max 20x pool to 2700% of Pro sessions and 1700% of Pro weeks', () => {
