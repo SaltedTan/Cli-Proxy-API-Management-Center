@@ -227,6 +227,87 @@ describe('summarizeProvider', () => {
     expect(summary.headline?.totalRemaining).toBeNull();
     expect(summary.headline?.segments).toEqual([null]);
   });
+
+  describe('weighted windows', () => {
+    // Claude's ledger shape: the 7-day headline, the weighted session, a scoped extra.
+    const credential = (
+      sevenDay: number,
+      session: number | null,
+      weight: number,
+      weightAssumed = false
+    ): LedgerSnapshot => ({
+      plan: null,
+      windows: [
+        win({ id: 'seven-day', remaining: sevenDay, periodHours: 168, scope: 'account' }),
+        win({
+          id: 'five-hour',
+          remaining: session,
+          resetAtMs: NOW + HOUR_MS,
+          periodHours: 5,
+          scope: 'account',
+          weight,
+          ...(weightAssumed ? { weightAssumed } : {}),
+        }),
+        win({ id: 'oauth', remaining: 90, periodHours: 168, scope: 'scoped' }),
+      ],
+    });
+    // Pro, Team, Max 5x and Max 20x, plus one credential not loaded yet.
+    const pool = [
+      credential(80, 50, 1),
+      credential(60, 80, 1.25),
+      credential(40, 40, 5),
+      credential(20, 90, 20),
+      null,
+    ];
+
+    test('pools remaining × weight against 100 × weight per loaded credential', () => {
+      const [session] = summarizeProvider(pool, NOW).weighted;
+      expect(session.id).toBe('five-hour');
+      // 50 + 80 × 1.25 + 40 × 5 + 90 × 20
+      expect(session.totalRemaining).toBe(2150);
+      // 100 + 125 + 500 + 2000; the unloaded credential's plan is unknown, so it adds nothing.
+      expect(session.capacity).toBe(2725);
+      expect(session.segments).toEqual([50, 80, 40, 90, null]);
+      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20, null], assumed: 0 });
+      expect(session.coverage).toBe(4);
+      expect(session.nextResetMs).toBe(NOW + HOUR_MS);
+    });
+
+    test('lists the weighted line apart from the folded secondary lines', () => {
+      const summary = summarizeProvider(pool, NOW);
+      expect(summary.headline?.id).toBe('seven-day');
+      expect(summary.weighted.map((line) => line.id)).toEqual(['five-hour']);
+      expect(summary.secondary.map((line) => line.id)).toEqual(['oauth']);
+    });
+
+    test('leaves unweighted lines exactly as they were', () => {
+      const summary = summarizeProvider(pool, NOW);
+      expect(summary.headline).toEqual({
+        id: 'seven-day',
+        label: 'seven-day',
+        totalRemaining: 200,
+        capacity: 500,
+        segments: [80, 60, 40, 20, null],
+        nextResetMs: null,
+        coverage: 4,
+        pace: { over: 0, on: 0, under: 0 },
+      });
+      expect('weighting' in summary.secondary[0]).toBe(false);
+      expect(summary.secondary[0].capacity).toBe(500);
+      expect(summarizeProvider(snapshots, NOW).weighted).toEqual([]);
+    });
+
+    test('counts stand-in weights, and still pools a credential without a figure', () => {
+      const [session] = summarizeProvider(
+        [credential(80, 30, 20), credential(80, null, 1, true), credential(80, 70, 1, true)],
+        NOW
+      ).weighted;
+      expect(session.totalRemaining).toBe(670);
+      expect(session.capacity).toBe(2200);
+      expect(session.segments).toEqual([30, null, 70]);
+      expect(session.weighting?.assumed).toBe(2);
+    });
+  });
 });
 
 describe('provider ledger extractors', () => {
@@ -292,6 +373,77 @@ describe('provider ledger extractors', () => {
   test('Claude shows the Max size when the profile reports one', () => {
     const quota: ClaudeQuotaState = { status: 'success', planType: 'plan_max5', windows: [] };
     expect(buildClaudeLedger(quota, i18n.t).plan).toBe('Max 5x');
+  });
+
+  describe('Claude 5-hour weights', () => {
+    const claudeQuota = (planType: string | null, session = 50): ClaudeQuotaState => ({
+      status: 'success',
+      planType,
+      windows: [
+        {
+          id: 'five-hour',
+          label: '5-hour limit',
+          labelKey: 'claude_quota.five_hour',
+          scope: 'account',
+          usedPercent: 100 - session,
+          resetLabel: '-',
+          resetAtMs: NOW + HOUR_MS,
+          periodHours: 5,
+        },
+        {
+          id: 'seven-day',
+          label: '7-day limit',
+          labelKey: 'claude_quota.seven_day',
+          scope: 'account',
+          usedPercent: 30,
+          resetLabel: '-',
+          resetAtMs: NOW + DAY_MS,
+          periodHours: 168,
+        },
+      ],
+    });
+
+    test('weights only the 5-hour window, in Pro sessions by plan', () => {
+      const cases: [string | null, number, boolean][] = [
+        ['plan_pro', 1, false],
+        ['plan_team', 1.25, false],
+        ['plan_max5', 5, false],
+        ['plan_max20', 20, false],
+        // Unsized plans and a failed profile request count as one Pro, flagged.
+        ['plan_max', 1, true],
+        ['plan_free', 1, true],
+        ['plan_enterprise', 1, true],
+        [null, 1, true],
+      ];
+      for (const [planType, weight, assumed] of cases) {
+        const ledger = buildClaudeLedger(claudeQuota(planType), i18n.t);
+        const [sevenDay, session] = ledger.windows;
+        expect(session.id).toBe('five-hour');
+        expect(session.weight).toBe(weight);
+        expect(session.weightAssumed === true).toBe(assumed);
+        expect('weight' in sevenDay).toBe(false);
+        expect('weightAssumed' in sevenDay).toBe(false);
+      }
+    });
+
+    test('two Pro, a Max 5x and a Max 20x pool to 2700% of Pro sessions', () => {
+      const summary = summarizeProvider(
+        [
+          buildClaudeLedger(claudeQuota('plan_pro', 40), i18n.t),
+          buildClaudeLedger(claudeQuota('plan_pro', 60), i18n.t),
+          buildClaudeLedger(claudeQuota('plan_max5', 20), i18n.t),
+          buildClaudeLedger(claudeQuota('plan_max20', 75), i18n.t),
+        ],
+        NOW
+      );
+      expect(summary.headline?.id).toBe('seven-day');
+      expect(summary.headline?.capacity).toBe(400);
+      expect(summary.secondary).toEqual([]);
+      const [session] = summary.weighted;
+      expect(session.capacity).toBe(2700);
+      expect(session.totalRemaining).toBe(40 + 60 + 100 + 1500);
+      expect(session.weighting?.weights).toEqual([1, 1, 5, 20]);
+    });
   });
 
   test('Claude accounts without a Fable limit lead with the 7-day limit and get no Fable column', () => {

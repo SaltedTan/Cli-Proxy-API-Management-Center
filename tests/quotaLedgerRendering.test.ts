@@ -14,7 +14,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import i18n from '@/i18n';
 import { QuotaSummaryStrip } from '@/features/quota/components/QuotaSummaryStrip';
 import { summarizeProvider } from '@/features/quota/ledgerModel';
+import { buildClaudeLedger } from '@/features/quota/providers/claude/ledger';
 import { DAY_MS } from '@/utils/time/durations';
+import type { ClaudeQuotaState, ClaudeQuotaWindow } from '@/types';
 import en from '@/i18n/locales/en.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
 import zhTW from '@/i18n/locales/zh-TW.json';
@@ -151,6 +153,94 @@ describe('QuotaSummaryStrip', () => {
     );
     expect(partial).toContain('1 of 2 can serve now · 1 partly paused');
     expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
+  });
+
+  describe('Claude 5-hour pool', () => {
+    const claudeWindow = (
+      key: string,
+      scope: 'account' | 'scoped',
+      usedPercent: number,
+      periodHours: number
+    ): ClaudeQuotaWindow => ({
+      id: key.replace(/_/g, '-'),
+      label: key,
+      labelKey: `claude_quota.${key}`,
+      scope,
+      usedPercent,
+      resetLabel: '-',
+      resetAtMs: NOW + DAY_MS,
+      periodHours,
+    });
+    const claude = (planType: string | null, session: number): ClaudeQuotaState => ({
+      status: 'success',
+      planType,
+      windows: [
+        claudeWindow('five_hour', 'account', 100 - session, 5),
+        claudeWindow('seven_day', 'account', 30, 168),
+        claudeWindow('seven_day_oauth_apps', 'scoped', 10, 168),
+        claudeWindow('seven_day_cowork', 'scoped', 10, 168),
+      ],
+    });
+    const render = (...quotas: (ClaudeQuotaState | null)[]) =>
+      renderToStaticMarkup(
+        createElement(QuotaSummaryStrip, {
+          groups: [
+            {
+              provider: 'claude',
+              summary: summarizeProvider(
+                quotas.map((quota) => (quota ? buildClaudeLedger(quota, i18n.t) : null)),
+                NOW
+              ),
+            },
+          ],
+          resolvedTheme: 'dark',
+          now: NOW,
+        })
+      );
+
+    test('reads in Pro sessions, right after the headline and never folded', () => {
+      // Pro 30% + Max 5x 50% + Max 20x 90% = 30 + 250 + 1800 of 100 + 500 + 2000.
+      const markup = render(
+        claude('plan_pro', 30),
+        claude('plan_max5', 50),
+        claude('plan_max20', 90)
+      );
+      expect(markup).toContain('2080%');
+      expect(markup).toContain('of 2600%');
+      expect(markup).toContain('In Pro units: Pro 100% · Team 125% · Max 5x 500% · Max 20x 2000%');
+      expect(markup).toContain(
+        'aria-label="2080% of 2600% remaining across 3 credentials, in Pro 5-hour units"'
+      );
+      expect(markup).not.toContain('counted as Pro');
+      // Segments are as wide as each credential's share of the pool.
+      expect(markup).toContain('style="flex-grow:5"');
+      expect(markup).toContain('style="flex-grow:20"');
+
+      const headline = markup.indexOf('7-day limit');
+      const session = markup.indexOf('5-hour limit');
+      const folded = markup.indexOf('hidden=""');
+      expect(headline).toBeGreaterThan(-1);
+      expect(session).toBeGreaterThan(headline);
+      // The two scoped weekly windows still fold; the session pool is above the toggle.
+      expect(markup).toContain('aria-expanded="false"');
+      expect(session).toBeLessThan(markup.indexOf('aria-expanded'));
+      expect(session).toBeLessThan(folded);
+      expect(markup.slice(folded)).not.toContain('5-hour limit');
+    });
+
+    test('says how many credentials it counted as Pro for want of a plan', () => {
+      const markup = render(
+        claude(null, 40),
+        claude('plan_max', 40),
+        claude('plan_max20', 50),
+        null
+      );
+      // 40 + 40 + 1000 of 100 + 100 + 2000; the unloaded credential adds no capacity.
+      expect(markup).toContain('1080%');
+      expect(markup).toContain('of 2200%');
+      expect(markup).toContain('2 counted as Pro (plan unknown)');
+      expect(markup).toContain('across 4 credentials, in Pro 5-hour units');
+    });
   });
 
   test('counts credentials the proxy will not select on a line of their own', () => {
@@ -293,6 +383,28 @@ describe('lane locale keys', () => {
       expect(KEYS.filter((key) => !quota[key])).toEqual([]);
       expect(messages.claude_quota.seven_day_model).toContain('{{model}}');
       expect('seven_day_fable' in messages.claude_quota).toBe(false);
+    });
+  }
+});
+
+const LOCALES = { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru, vi, ko };
+
+describe('Claude 5-hour pool locale keys', () => {
+  for (const [locale, messages] of Object.entries(LOCALES)) {
+    test(`${locale} translates the Pro-unit hint, label and stand-in note`, () => {
+      const quota = messages.quota_management as Record<string, string>;
+      expect(quota.summary_pro_units_hint).toContain('{{scale}}');
+      for (const token of ['{{total}}', '{{capacity}}', '{{count}}']) {
+        expect(quota.summary_pro_units_segments_label).toContain(token);
+      }
+      // Chinese has no plural forms; the others carry at least `_other`.
+      const assumed = quota.summary_pro_units_assumed ?? quota.summary_pro_units_assumed_other;
+      expect(assumed).toContain('{{count}}');
+      expect(assumed).toContain('Pro');
+      // Plan names stay untranslated, so the scale reads the same everywhere.
+      for (const plan of ['plan_pro', 'plan_team', 'plan_max5', 'plan_max20'] as const) {
+        expect(messages.claude_quota[plan]).toBe(en.claude_quota[plan]);
+      }
     });
   }
 });

@@ -7,7 +7,9 @@
  * tallies how many credentials spend that window over, on or under pace.
  * A model's own limit (Claude's Fable weekly) gets a block of its own: its pool,
  * how many credentials could serve the model now, and whether any is projected
- * to stop before its refill. Other secondary windows fold behind a toggle — the
+ * to stop before its refill. A weighted pool (Claude's 5-hour limit, counted in
+ * Pro sessions) follows the headline, always in view, with segments as wide as
+ * each credential's share. Other secondary windows fold behind a toggle — the
  * strip is for orientation, the ledger below is for detail.
  *
  * Credentials the proxy will not select (disabled, or unavailable for a reason
@@ -17,6 +19,7 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { ResolvedTheme } from '@/types';
 import { formatInstantShort, formatInstantWeekday, formatRelativeInstant } from '@/utils/quota';
 import {
@@ -33,6 +36,7 @@ import {
 } from '../ledgerModel';
 import { approximateInstant } from '../laneModel';
 import type { PaceCounts } from '../paceModel';
+import { formatClaudeSessionScale } from '../providers/claude/ledger';
 import type { QuotaProviderType } from '../providers/types';
 import { QUOTA_PROGRESS_HIGH_THRESHOLD, QUOTA_PROGRESS_MEDIUM_THRESHOLD } from './QuotaMeter';
 import styles from './QuotaSummaryStrip.module.scss';
@@ -56,6 +60,15 @@ const levelClass = (remaining: number) =>
     : remaining >= QUOTA_PROGRESS_MEDIUM_THRESHOLD
       ? styles.segmentMedium
       : styles.segmentLow;
+
+/** The segments' accessible name; a weighted pool says which unit it counts in. */
+const segmentsLabel = (t: TFunction, line: ProviderSummaryLine | null, count: number) => {
+  const total = formatPercent(line?.totalRemaining ?? null);
+  const capacity = `${line?.capacity ?? count * 100}%`;
+  return line?.weighting
+    ? t('quota_management.summary_pro_units_segments_label', { total, capacity, count })
+    : t('quota_management.summary_segments_label', { total, capacity, count });
+};
 
 export function QuotaSummaryStrip({ groups, resolvedTheme, now }: QuotaSummaryStripProps) {
   const { t } = useTranslation();
@@ -125,26 +138,12 @@ function SummaryCell({
         </span>
       </div>
 
-      <div
-        className={styles.segments}
-        role="img"
-        aria-label={t('quota_management.summary_segments_label', {
-          total: formatPercent(total),
-          capacity: `${capacity}%`,
-          count: segments.length,
-        })}
-      >
-        {segments.map((remaining, index) => (
-          <span key={index} className={styles.segment}>
-            {remaining !== null && (
-              <span
-                className={`${styles.segmentFill} ${levelClass(remaining)}`}
-                style={{ width: `${remaining}%` }}
-              />
-            )}
-          </span>
-        ))}
-      </div>
+      <Segments
+        segments={segments}
+        weights={headline?.weighting?.weights}
+        label={segmentsLabel(t, headline, segments.length)}
+      />
+      {headline?.weighting && <WeightingNotes assumed={headline.weighting.assumed} />}
 
       {(group.unavailable ?? 0) > 0 && (
         <div className={styles.unavailable}>
@@ -158,6 +157,10 @@ function SummaryCell({
       )}
 
       {headline && <PaceLine pace={headline.pace} />}
+
+      {summary.weighted.map((line) => (
+        <WeightedBlock key={line.id} line={line} />
+      ))}
 
       {summary.models.map((model) => (
         <ModelBlock key={model.line.id} model={model} locale={i18n.resolvedLanguage} />
@@ -196,11 +199,27 @@ function SummaryCell({
   );
 }
 
-function Segments({ line, label }: { line: ProviderSummaryLine; label: string }) {
+/**
+ * One segment per credential. With weights, each segment is as wide as its
+ * share of the pool; a credential not loaded yet has no weight and takes one unit.
+ */
+function Segments({
+  segments,
+  weights,
+  label,
+}: {
+  segments: (number | null)[];
+  weights?: (number | null)[];
+  label: string;
+}) {
   return (
     <div className={styles.segments} role="img" aria-label={label}>
-      {line.segments.map((remaining, index) => (
-        <span key={index} className={styles.segment}>
+      {segments.map((remaining, index) => (
+        <span
+          key={index}
+          className={styles.segment}
+          style={weights ? { flexGrow: weights[index] ?? 1 } : undefined}
+        >
           {remaining !== null && (
             <span
               className={`${styles.segmentFill} ${levelClass(remaining)}`}
@@ -210,6 +229,50 @@ function Segments({ line, label }: { line: ProviderSummaryLine; label: string })
         </span>
       ))}
     </div>
+  );
+}
+
+/**
+ * A pool counted in weighted units rather than 100% per credential: Claude's
+ * 5-hour limit in Pro sessions, so a Max 20x account holds twenty times what a
+ * Pro one does. Always in view — no other line on the strip implies it.
+ */
+function WeightedBlock({ line }: { line: ProviderSummaryLine }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.model}>
+      <div className={styles.headlineLabel}>{line.label}</div>
+      <div className={styles.figure}>
+        <span className={styles.modelTotal}>{formatPercent(line.totalRemaining)}</span>
+        <span className={styles.capacity}>
+          {t('quota_management.summary_of_capacity', { capacity: line.capacity })}
+        </span>
+      </div>
+      <Segments
+        segments={line.segments}
+        weights={line.weighting?.weights}
+        label={segmentsLabel(t, line, line.segments.length)}
+      />
+      <WeightingNotes assumed={line.weighting?.assumed ?? 0} />
+    </div>
+  );
+}
+
+/** The unit a weighted pool counts in, and how many credentials it had to guess. */
+function WeightingNotes({ assumed }: { assumed: number }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className={styles.weightScale}>
+        {t('quota_management.summary_pro_units_hint', { scale: formatClaudeSessionScale(t) })}
+      </div>
+      {assumed > 0 && (
+        <div className={styles.weightAssumed}>
+          <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
+          {t('quota_management.summary_pro_units_assumed', { count: assumed })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -255,12 +318,9 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
         </span>
       </div>
       <Segments
-        line={line}
-        label={t('quota_management.summary_segments_label', {
-          total,
-          capacity: `${line.capacity}%`,
-          count: line.segments.length,
-        })}
+        segments={line.segments}
+        weights={line.weighting?.weights}
+        label={segmentsLabel(t, line, line.segments.length)}
       />
       {(model.serving > 0 || model.partial > 0) && (
         <div className={styles.modelOutlook}>

@@ -38,6 +38,14 @@ export interface LedgerWindow {
   scope?: QuotaWindowScope;
   /** Display name of the model a scoped window limits — such a window gets a ledger lane. */
   model?: string | null;
+  /**
+   * What this window's 100% is worth when pooled across credentials, in the
+   * provider's unit: Claude's 5-hour limit counts Pro sessions, so a Max 20x
+   * window weighs 20. Absent = unweighted, pooled as 100% like every other.
+   */
+  weight?: number;
+  /** The weight is a stand-in (plan unknown, so one unit), not read from the plan. */
+  weightAssumed?: boolean;
 }
 
 /**
@@ -166,6 +174,7 @@ export interface ProviderSummaryLine {
    * 100 per credential that reports this window or is not loaded yet — the pool
    * if every one of them were untouched. Loaded credentials without the window
    * (a Claude account with no model-scoped limit) are not part of its pool.
+   * A weighted line counts differently; see `weighting`.
    */
   capacity: number;
   /** One entry per pooled credential, in row order; null = no figure yet. */
@@ -176,6 +185,18 @@ export interface ProviderSummaryLine {
   coverage: number;
   /** Credentials per pace verdict; windows without a known pace are not counted. */
   pace: PaceCounts;
+  /**
+   * Set when the column's windows carry weights. The total and capacity are
+   * then in weight units × 100 — `remaining × weight` and `100 × weight` per
+   * loaded credential — and a credential not loaded yet adds no capacity, since
+   * its weight is unknown until it is.
+   */
+  weighting?: {
+    /** One per segment, in row order; null for a credential not loaded yet. */
+    weights: (number | null)[];
+    /** Loaded credentials whose weight is a stand-in for an unknown plan. */
+    assumed: number;
+  };
 }
 
 /** A model's own limit, pooled, plus whether its lanes can take a request now. */
@@ -205,6 +226,8 @@ export interface ProviderSummary {
   headline: ProviderSummaryLine | null;
   /** Model-scoped limits that get a lane in the ledger, in column order. */
   models: ProviderModelSummary[];
+  /** Weighted pools other than the headline (Claude's 5-hour limit), in column order. */
+  weighted: ProviderSummaryLine[];
   /** Remaining columns, longest window first. */
   secondary: ProviderSummaryLine[];
 }
@@ -228,6 +251,10 @@ export interface ProviderSummary {
  * A model-scoped window (one with a ledger lane) is summarized as a model block
  * rather than a secondary line, so it can say how many credentials could serve
  * the model now — which its own percentage cannot (see laneModel.ts).
+ *
+ * A column whose windows carry weights pools in their unit instead, so a Max
+ * 20x session counts twenty Pro sessions rather than one more 100%; it is
+ * listed apart from the folded secondary lines (see `ProviderSummaryLine.weighting`).
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],
@@ -243,16 +270,27 @@ export function summarizeProvider(
     let coverage = 0;
     const segments: (number | null)[] = [];
     const pace: PaceCounts = { over: 0, on: 0, under: 0 };
+    // Unweighted windows weigh 1, which leaves the sums exactly as they were.
+    const weights: (number | null)[] = [];
+    let weighted = false;
+    let weightedCapacity = 0;
+    let assumed = 0;
     for (const snapshot of snapshots) {
       if (snapshot === null) {
         segments.push(null);
+        weights.push(null);
         continue;
       }
       const window = snapshot.windows.find((candidate) => candidate.id === column.id);
       if (!window) continue;
+      const weight = window.weight ?? 1;
+      if (window.weight !== undefined) weighted = true;
+      if (window.weightAssumed) assumed += 1;
+      weights.push(weight);
+      weightedCapacity += 100 * weight;
       coverage += 1;
       segments.push(window.remaining);
-      if (window.remaining !== null) total = (total ?? 0) + window.remaining;
+      if (window.remaining !== null) total = (total ?? 0) + window.remaining * weight;
       const windowPace = computeWindowPace(window, nowMs);
       if (windowPace.status !== 'unknown') pace[windowPace.status] += 1;
       if (
@@ -267,11 +305,12 @@ export function summarizeProvider(
       id: column.id,
       label: column.label,
       totalRemaining: total,
-      capacity: segments.length * 100,
+      capacity: weighted ? weightedCapacity : segments.length * 100,
       segments,
       nextResetMs,
       coverage,
       pace,
+      ...(weighted ? { weighting: { weights, assumed } } : {}),
     };
   });
 
@@ -314,13 +353,18 @@ export function summarizeProvider(
       ];
     });
 
+  const rest = lines.filter(
+    (line) => line !== headline && !models.some((model) => model.line === line)
+  );
+  const weighted = rest.filter((line) => line.weighting !== undefined);
+
   const period = (line: ProviderSummaryLine) => columnFor(line)?.periodHours ?? 0;
   // Stable: equal periods keep column order.
-  const secondary = lines
-    .filter((line) => line !== headline && !models.some((model) => model.line === line))
+  const secondary = rest
+    .filter((line) => line.weighting === undefined)
     .map((line, index) => ({ line, index }))
     .sort((a, b) => period(b.line) - period(a.line) || a.index - b.index)
     .map(({ line }) => line);
 
-  return { credentialCount, loadedCount, headline, models, secondary };
+  return { credentialCount, loadedCount, headline, models, weighted, secondary };
 }

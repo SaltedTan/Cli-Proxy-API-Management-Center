@@ -219,7 +219,8 @@
 
 .modelServing,
 .modelOutlook,
-.unavailable {
+.unavailable,
+.weightAssumed {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -235,6 +236,13 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text-primary);
+}
+
+/* Weighted pool (Claude's 5-hour limit in Pro sessions): the unit it counts in */
+.weightScale {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
 }
 
 /* 与账本车道同一套记号：圆 = 都可用，三角 = 部分 / 即将用尽，方块 = 都已暂停 */
