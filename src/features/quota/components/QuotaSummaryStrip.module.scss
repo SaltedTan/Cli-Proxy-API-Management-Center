@@ -122,6 +122,12 @@
   background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 
+/* A weighted bar draws each segment as its share of the pool; a minimum width
+ * would inflate a small share (one Pro beside several Max 20x) and overstate it. */
+.segmentsWeighted .segment {
+  min-width: 0;
+}
+
 .segmentFill {
   display: block;
   height: 100%;

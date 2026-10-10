@@ -425,6 +425,20 @@ describe('ledger source contracts', () => {
     expect(ledger).toContain("t('quota_management.lane_unavailable_note')");
   });
 
+  test('only weighted summary bars drop the segment minimum width', () => {
+    const strip = readFileSync('src/features/quota/components/QuotaSummaryStrip.tsx', 'utf8');
+    const stripStyles = readFileSync(
+      'src/features/quota/components/QuotaSummaryStrip.module.scss',
+      'utf8'
+    );
+    expect(strip).toContain(
+      'className={weights ? `${styles.segments} ${styles.segmentsWeighted}` : styles.segments}'
+    );
+    expect(stripStyles).toMatch(/\.segmentsWeighted \.segment \{\s*min-width: 0;\s*\}/);
+    // Unweighted bars keep their minimum, so an empty or unloaded segment stays visible.
+    expect(stripStyles).toMatch(/\n\.segment \{[^}]*min-width: 6px;/);
+  });
+
   test('page defaults to the ledger and masks emails until asked', () => {
     expect(page).toContain("readQuotaUiState()?.view ?? 'ledger'");
     expect(page).toContain('readQuotaUiState()?.showEmails ?? false');

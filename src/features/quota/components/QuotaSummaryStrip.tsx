@@ -234,7 +234,11 @@ function Segments({
   label: string;
 }) {
   return (
-    <div className={styles.segments} role="img" aria-label={label}>
+    <div
+      className={weights ? `${styles.segments} ${styles.segmentsWeighted}` : styles.segments}
+      role="img"
+      aria-label={label}
+    >
       {segments.map((remaining, index) => (
         <span
           key={index}
