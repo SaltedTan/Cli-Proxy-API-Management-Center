@@ -1802,6 +1802,7 @@
     "summary_unavailable_other": "{{count}} credentials unavailable to the proxy",
     "summary_pro_units_hint": "In Pro units: {{scale}}",
     "summary_pro_units_segments_label": "{{total}} of {{capacity}} remaining across {{count}} credentials, in Pro 5-hour units",
+    "summary_pro_units_weekly_segments_label": "{{total}} of {{capacity}} remaining across {{count}} credentials, in Pro weekly units",
     "summary_pro_units_assumed_one": "{{count}} counted as Pro (plan unknown)",
     "summary_pro_units_assumed_other": "{{count}} counted as Pro (plan unknown)",
     "summary_pro_units_gated_one": "{{count}} has used up its 7-day limit, counted as empty until it resets",

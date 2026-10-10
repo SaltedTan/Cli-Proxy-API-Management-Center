@@ -1811,6 +1811,7 @@
     "summary_unavailable_other": "{{count}} учётной записи недоступны для прокси",
     "summary_pro_units_hint": "В единицах Pro: {{scale}}",
     "summary_pro_units_segments_label": "Осталось {{total}} из {{capacity}} на {{count}} учётных записях, в 5-часовых лимитах Pro",
+    "summary_pro_units_weekly_segments_label": "Осталось {{total}} из {{capacity}} на {{count}} учётных записях, в недельных лимитах Pro",
     "summary_pro_units_assumed_one": "{{count}} учётная запись учтена как Pro (план неизвестен)",
     "summary_pro_units_assumed_few": "{{count}} учётные записи учтены как Pro (план неизвестен)",
     "summary_pro_units_assumed_many": "{{count}} учётных записей учтены как Pro (план неизвестен)",

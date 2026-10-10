@@ -41,7 +41,8 @@ export interface LedgerWindow {
   /**
    * What this window's 100% is worth when pooled across credentials, in the
    * provider's unit: Claude's 5-hour limit counts Pro sessions, so a Max 20x
-   * window weighs 20. Absent = unweighted, pooled as 100% like every other.
+   * window weighs 20, and its 7-day limit Pro weeks, where it weighs 10.
+   * Absent = unweighted, pooled as 100% like every other.
    */
   weight?: number;
   /** The weight is a stand-in (plan unknown, so one unit), not read from the plan. */
@@ -321,7 +322,7 @@ const gatedTopUpMs = (
  * its window is spent and resets after that (see `gatedTopUpMs`), and never as
  * far as the pool can tell when the gate's reset is unknown. This matches the
  * proxy's own key-usage pools (internal/keyusage/pool.go), which pool the
- * 5-hour and Fable figures the same way. Other lines report each window as is.
+ * 5-hour, weekly and Fable figures the same way. Other lines report each window as is.
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],

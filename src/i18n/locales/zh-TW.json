@@ -1824,6 +1824,7 @@
     "summary_unavailable": "{{count}} 個憑證代理無法使用",
     "summary_pro_units_hint": "以 Pro 為單位：{{scale}}",
     "summary_pro_units_segments_label": "{{count}} 個憑證共剩餘 {{total}}（總量 {{capacity}}），以 Pro 的 5 小時額度為單位",
+    "summary_pro_units_weekly_segments_label": "{{count}} 個憑證共剩餘 {{total}}（總量 {{capacity}}），以 Pro 的每週額度為單位",
     "summary_pro_units_assumed": "{{count}} 個按 Pro 計（方案未知）",
     "summary_pro_units_gated": "{{count}} 個已用完 7 天限額，重置前按空計",
     "summary_pro_units_not_loaded": "{{count}} 個尚未載入，未計入",

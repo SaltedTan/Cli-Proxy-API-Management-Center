@@ -5,20 +5,20 @@ import type { LedgerSnapshot, LedgerWindow } from '../../ledgerModel';
 
 /**
  * Account-wide windows lead: they gate every request, so the 7-day limit is the
- * one the summary pools. Model-scoped limits (Fable) follow in payload order and
- * get their own lane in the ledger (laneModel.ts) — their own bar is not always
- * what stops the model, so they are no longer the headline.
+ * one the summary pools (in Pro weeks, beside the 5-hour limit in Pro sessions).
+ * Model-scoped limits (Fable) follow in payload order and get their own lane in
+ * the ledger (laneModel.ts) — their own bar is not always what stops the model,
+ * so they are no longer the headline.
  */
 const CLAUDE_HEADLINE_ORDER = ['seven-day', 'five-hour'] as const;
 
-const CLAUDE_SESSION_WINDOW_ID = 'five-hour';
+export const CLAUDE_SESSION_WINDOW_ID = 'five-hour';
+export const CLAUDE_WEEKLY_WINDOW_ID = 'seven-day';
 
 /**
  * Each plan's 5-hour (session) limit in Pro sessions, keyed by the plan type
  * resolveClaudePlanType gives, so the summary pools sessions of different sizes.
- * These are not the weekly ratios (a Max 20x week is about ten Pro weeks), so
- * only the 5-hour window is weighted. Keep in step with SessionProUnits in the
- * backend's internal/claudeplan.
+ * Keep in step with SessionProUnits in the backend's internal/claudeplan.
  */
 export const CLAUDE_SESSION_PRO_UNITS: ReadonlyMap<string, number> = new Map([
   ['plan_pro', 1],
@@ -28,35 +28,61 @@ export const CLAUDE_SESSION_PRO_UNITS: ReadonlyMap<string, number> = new Map([
 ]);
 
 /**
- * A plan the table does not size — the profile request failed, Max of unknown
- * size, Free — counts as one Pro session, as the backend does, and says so.
+ * Each plan's weekly allowance in Pro weeks, which weighs the account-wide 7-day
+ * limit as the proxy's weekly figure does. These are not the session ratios: a
+ * Max 20x week is about ten Pro weeks, though its session is twenty. Keep in step
+ * with ProUnits in the backend's internal/claudeplan.
  */
-const sessionWeight = (
+export const CLAUDE_WEEKLY_PRO_UNITS: ReadonlyMap<string, number> = new Map([
+  ['plan_pro', 1],
+  ['plan_team', 1.25],
+  ['plan_max5', 5],
+  ['plan_max20', 10],
+]);
+
+/** The table a pooled window is weighed by; other windows pool unweighted. */
+const CLAUDE_PRO_UNITS_BY_WINDOW: ReadonlyMap<string, ReadonlyMap<string, number>> = new Map([
+  [CLAUDE_SESSION_WINDOW_ID, CLAUDE_SESSION_PRO_UNITS],
+  [CLAUDE_WEEKLY_WINDOW_ID, CLAUDE_WEEKLY_PRO_UNITS],
+]);
+
+/**
+ * A plan the table does not size — the profile request failed, Max of unknown
+ * size, Free — counts as one Pro, and says so.
+ */
+const planWeight = (
+  table: ReadonlyMap<string, number>,
   planType: string | null | undefined
 ): Pick<LedgerWindow, 'weight' | 'weightAssumed'> => {
-  const units = planType ? CLAUDE_SESSION_PRO_UNITS.get(planType) : undefined;
+  const units = planType ? table.get(planType) : undefined;
   return units !== undefined ? { weight: units } : { weight: 1, weightAssumed: true };
 };
 
-/** The session scale as shown beside the pool: `Pro 100% · Team 125% · …`. */
-export const formatClaudeSessionScale = (t: TFunction): string =>
-  [...CLAUDE_SESSION_PRO_UNITS]
+/**
+ * A weighted window's scale as shown beside its pool: `Pro 100% · Team 125% · …`,
+ * per 7-day limit for the weekly pool and per session otherwise.
+ */
+export const formatClaudeProUnitsScale = (t: TFunction, windowId: string): string =>
+  [...(windowId === CLAUDE_WEEKLY_WINDOW_ID ? CLAUDE_WEEKLY_PRO_UNITS : CLAUDE_SESSION_PRO_UNITS)]
     .map(([planType, units]) => `${t(`claude_quota.${planType}`)} ${units * 100}%`)
     .join(' · ');
 
 export function buildClaudeLedger(quota: ClaudeQuotaState, t: TFunction): LedgerSnapshot {
   return {
     plan: quota.planType ? t(`claude_quota.${quota.planType}`) : null,
-    windows: orderLedgerWindows(quota.windows ?? [], CLAUDE_HEADLINE_ORDER).map((window) => ({
-      id: window.id,
-      label: window.labelKey ? t(window.labelKey, window.labelParams) : window.label,
-      remaining: remainingFromUsed(window.usedPercent),
-      resetAtMs: usableMs(window.resetAtMs),
-      resetLabel: window.resetLabel,
-      periodHours: window.periodHours ?? null,
-      ...(window.scope ? { scope: window.scope } : {}),
-      ...(window.model ? { model: window.model } : {}),
-      ...(window.id === CLAUDE_SESSION_WINDOW_ID ? sessionWeight(quota.planType) : {}),
-    })),
+    windows: orderLedgerWindows(quota.windows ?? [], CLAUDE_HEADLINE_ORDER).map((window) => {
+      const units = CLAUDE_PRO_UNITS_BY_WINDOW.get(window.id);
+      return {
+        id: window.id,
+        label: window.labelKey ? t(window.labelKey, window.labelParams) : window.label,
+        remaining: remainingFromUsed(window.usedPercent),
+        resetAtMs: usableMs(window.resetAtMs),
+        resetLabel: window.resetLabel,
+        periodHours: window.periodHours ?? null,
+        ...(window.scope ? { scope: window.scope } : {}),
+        ...(window.model ? { model: window.model } : {}),
+        ...(units ? planWeight(units, quota.planType) : {}),
+      };
+    }),
   };
 }

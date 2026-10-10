@@ -705,7 +705,7 @@ describe('provider ledger extractors', () => {
     expect(buildClaudeLedger(quota, i18n.t).plan).toBe('Max 5x');
   });
 
-  describe('Claude 5-hour weights', () => {
+  describe('Claude 5-hour and 7-day weights', () => {
     const claudeQuota = (planType: string | null, session = 50): ClaudeQuotaState => ({
       status: 'success',
       planType,
@@ -733,30 +733,53 @@ describe('provider ledger extractors', () => {
       ],
     });
 
-    test('weights only the 5-hour window, in Pro sessions by plan', () => {
-      const cases: [string | null, number, boolean][] = [
-        ['plan_pro', 1, false],
-        ['plan_team', 1.25, false],
-        ['plan_max5', 5, false],
-        ['plan_max20', 20, false],
+    test('weights the 5-hour window in Pro sessions and the 7-day in Pro weeks, by plan', () => {
+      const cases: [string | null, number, number, boolean][] = [
+        ['plan_pro', 1, 1, false],
+        ['plan_team', 1.25, 1.25, false],
+        ['plan_max5', 5, 5, false],
+        // A Max 20x session is twenty Pro sessions, its week only ten Pro weeks.
+        ['plan_max20', 20, 10, false],
         // Unsized plans and a failed profile request count as one Pro, flagged.
-        ['plan_max', 1, true],
-        ['plan_free', 1, true],
-        ['plan_enterprise', 1, true],
-        [null, 1, true],
+        ['plan_max', 1, 1, true],
+        ['plan_free', 1, 1, true],
+        ['plan_enterprise', 1, 1, true],
+        [null, 1, 1, true],
       ];
-      for (const [planType, weight, assumed] of cases) {
+      for (const [planType, sessionWeight, weeklyWeight, assumed] of cases) {
         const ledger = buildClaudeLedger(claudeQuota(planType), i18n.t);
         const [sevenDay, session] = ledger.windows;
         expect(session.id).toBe('five-hour');
-        expect(session.weight).toBe(weight);
+        expect(session.weight).toBe(sessionWeight);
         expect(session.weightAssumed === true).toBe(assumed);
-        expect('weight' in sevenDay).toBe(false);
-        expect('weightAssumed' in sevenDay).toBe(false);
+        expect(sevenDay.id).toBe('seven-day');
+        expect(sevenDay.weight).toBe(weeklyWeight);
+        expect(sevenDay.weightAssumed === true).toBe(assumed);
       }
     });
 
-    test('two Pro, a Max 5x and a Max 20x pool to 2700% of Pro sessions', () => {
+    test('leaves model-scoped weekly windows unweighted', () => {
+      const quota = claudeQuota('plan_max20');
+      quota.windows = [
+        ...(quota.windows ?? []),
+        {
+          id: 'seven-day-fable',
+          label: '7-day Fable',
+          scope: 'scoped',
+          model: 'Fable',
+          usedPercent: 20,
+          resetLabel: '-',
+          resetAtMs: NOW + DAY_MS,
+          periodHours: 168,
+        },
+      ];
+      const fable = buildClaudeLedger(quota, i18n.t).windows.find(
+        (window) => window.id === 'seven-day-fable'
+      );
+      expect(fable && 'weight' in fable).toBe(false);
+    });
+
+    test('two Pro, a Max 5x and a Max 20x pool to 2700% of Pro sessions and 1700% of Pro weeks', () => {
       const summary = summarizeProvider(
         [
           buildClaudeLedger(claudeQuota('plan_pro', 40), i18n.t),
@@ -766,8 +789,11 @@ describe('provider ledger extractors', () => {
         ],
         NOW
       );
+      // Each has 70% of its week left: 70 × (1 + 1 + 5 + 10).
       expect(summary.headline?.id).toBe('seven-day');
-      expect(summary.headline?.capacity).toBe(400);
+      expect(summary.headline?.capacity).toBe(1700);
+      expect(summary.headline?.totalRemaining).toBe(1190);
+      expect(summary.headline?.weighting).toEqual({ weights: [1, 1, 5, 10], assumed: 0 });
       expect(summary.secondary).toEqual([]);
       const [session] = summary.weighted;
       expect(session.capacity).toBe(2700);

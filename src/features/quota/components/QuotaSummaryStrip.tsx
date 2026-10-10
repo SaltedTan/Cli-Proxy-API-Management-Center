@@ -5,6 +5,8 @@
  * ("409% of 500%"), draws one segment per credential so a single exhausted
  * account stays visible inside a healthy total, names the soonest reset and
  * tallies how many credentials spend that window over, on or under pace.
+ * Claude's headline, the 7-day limit, is weighted in Pro weeks, as the proxy's
+ * own weekly figure is, so a Max 20x account holds ten times what a Pro one does.
  * A model's own limit (Claude's Fable weekly) gets a block of its own: its pool,
  * how many credentials could serve the model now, and whether any is projected
  * to stop before its refill. A weighted pool (Claude's 5-hour limit, counted in
@@ -37,7 +39,11 @@ import {
 } from '../ledgerModel';
 import { approximateInstant } from '../laneModel';
 import type { PaceCounts } from '../paceModel';
-import { formatClaudeSessionScale } from '../providers/claude/ledger';
+import {
+  CLAUDE_SESSION_WINDOW_ID,
+  CLAUDE_WEEKLY_WINDOW_ID,
+  formatClaudeProUnitsScale,
+} from '../providers/claude/ledger';
 import type { QuotaProviderType } from '../providers/types';
 import { QUOTA_PROGRESS_HIGH_THRESHOLD, QUOTA_PROGRESS_MEDIUM_THRESHOLD } from './QuotaMeter';
 import styles from './QuotaSummaryStrip.module.scss';
@@ -66,9 +72,12 @@ const levelClass = (remaining: number) =>
 const segmentsLabel = (t: TFunction, line: ProviderSummaryLine | null, count: number) => {
   const total = formatPercent(line?.totalRemaining ?? null);
   const capacity = `${line?.capacity ?? count * 100}%`;
-  return line?.weighting
-    ? t('quota_management.summary_pro_units_segments_label', { total, capacity, count })
-    : t('quota_management.summary_segments_label', { total, capacity, count });
+  if (!line?.weighting) {
+    return t('quota_management.summary_segments_label', { total, capacity, count });
+  }
+  return line.id === CLAUDE_WEEKLY_WINDOW_ID
+    ? t('quota_management.summary_pro_units_weekly_segments_label', { total, capacity, count })
+    : t('quota_management.summary_pro_units_segments_label', { total, capacity, count });
 };
 
 export function QuotaSummaryStrip({ groups, resolvedTheme, now }: QuotaSummaryStripProps) {
@@ -109,7 +118,10 @@ function SummaryCell({
   // Claude's 5-hour pool keeps its place while credentials load or refresh, so
   // the strip does not jump when the first one reports it.
   const sessionPending =
-    provider === 'claude' && summary.weighted.length === 0 && !headline?.weighting && notLoaded > 0;
+    provider === 'claude' &&
+    notLoaded > 0 &&
+    headline?.id !== CLAUDE_SESSION_WINDOW_ID &&
+    !summary.weighted.some((line) => line.id === CLAUDE_SESSION_WINDOW_ID);
 
   return (
     <article className={styles.cell}>
@@ -307,7 +319,8 @@ function WeightedBlock({
 /**
  * The unit a weighted pool counts in; how many credentials it counts as empty
  * because their 7-day limit is used up, and how many it had to guess a weight
- * for; and how many it leaves out until they load.
+ * for; and how many it leaves out until they load. With no line yet, it is the
+ * 5-hour pool's placeholder.
  */
 function WeightingNotes({
   line,
@@ -317,10 +330,11 @@ function WeightingNotes({
   notLoaded: number;
 }) {
   const { t } = useTranslation();
+  const scale = formatClaudeProUnitsScale(t, line?.id ?? CLAUDE_SESSION_WINDOW_ID);
   return (
     <>
       <div className={styles.weightScale}>
-        {t('quota_management.summary_pro_units_hint', { scale: formatClaudeSessionScale(t) })}
+        {t('quota_management.summary_pro_units_hint', { scale })}
       </div>
       <CountNote textKey="quota_management.summary_pro_units_gated" count={line?.gated ?? 0} />
       <CountNote
