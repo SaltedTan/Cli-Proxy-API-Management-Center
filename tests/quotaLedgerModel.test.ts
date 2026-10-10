@@ -265,10 +265,11 @@ describe('summarizeProvider', () => {
       expect(session.id).toBe('five-hour');
       // 50 + 80 × 1.25 + 40 × 5 + 90 × 20
       expect(session.totalRemaining).toBe(2150);
-      // 100 + 125 + 500 + 2000; the unloaded credential's plan is unknown, so it adds nothing.
+      // 100 + 125 + 500 + 2000. The unloaded credential's plan is unknown, so it is
+      // left out of the pool — no capacity, and no segment the bar would draw.
       expect(session.capacity).toBe(2725);
-      expect(session.segments).toEqual([50, 80, 40, 90, null]);
-      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20, null], assumed: 0 });
+      expect(session.segments).toEqual([50, 80, 40, 90]);
+      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20], assumed: 0 });
       expect(session.coverage).toBe(4);
       expect(session.nextResetMs).toBe(NOW + HOUR_MS);
     });
@@ -306,6 +307,42 @@ describe('summarizeProvider', () => {
       expect(session.capacity).toBe(2200);
       expect(session.segments).toEqual([30, null, 70]);
       expect(session.weighting?.assumed).toBe(2);
+    });
+
+    test('keeps segments and weights aligned past a credential without the window', () => {
+      const withoutSession: LedgerSnapshot = {
+        plan: null,
+        windows: [win({ id: 'seven-day', remaining: 50, periodHours: 168, scope: 'account' })],
+      };
+      const summary = summarizeProvider(
+        [credential(80, 40, 5), withoutSession, null, credential(80, 90, 20)],
+        NOW
+      );
+      const [session] = summary.weighted;
+      expect(session.segments).toEqual([40, 90]);
+      expect(session.weighting?.weights).toEqual([5, 20]);
+      expect(session.capacity).toBe(2500);
+      expect(session.coverage).toBe(2);
+      // The unweighted headline still keeps a blank segment for the unloaded credential.
+      expect(summary.headline?.segments).toEqual([80, 50, null, 80]);
+    });
+
+    test('a weighted window headlines when nothing else is reported, still weighted', () => {
+      const sessionOnly = (session: number, weight: number): LedgerSnapshot => ({
+        plan: null,
+        windows: [win({ id: 'five-hour', remaining: session, periodHours: 5, weight })],
+      });
+      const summary = summarizeProvider([sessionOnly(50, 1), sessionOnly(10, 20), null], NOW);
+      expect(summary.headline?.id).toBe('five-hour');
+      expect(summary.headline?.capacity).toBe(2100);
+      expect(summary.headline?.totalRemaining).toBe(250);
+      expect(summary.headline?.segments).toEqual([50, 10]);
+      expect(summary.weighted).toEqual([]);
+    });
+
+    test('nothing loaded yet leaves no weighted line', () => {
+      const summary = summarizeProvider([null, null], NOW);
+      expect(summary.weighted).toEqual([]);
     });
   });
 });

@@ -188,12 +188,13 @@ export interface ProviderSummaryLine {
   /**
    * Set when the column's windows carry weights. The total and capacity are
    * then in weight units × 100 — `remaining × weight` and `100 × weight` per
-   * loaded credential — and a credential not loaded yet adds no capacity, since
-   * its weight is unknown until it is.
+   * loaded credential. A credential not loaded yet is left out of the pool,
+   * segments included: its weight is unknown until it loads, and a bar drawn
+   * against this capacity must not hold room the capacity does not count.
    */
   weighting?: {
-    /** One per segment, in row order; null for a credential not loaded yet. */
-    weights: (number | null)[];
+    /** One per segment, in the same order. */
+    weights: number[];
     /** Loaded credentials whose weight is a stand-in for an unknown plan. */
     assumed: number;
   };
@@ -253,8 +254,9 @@ export interface ProviderSummary {
  * the model now — which its own percentage cannot (see laneModel.ts).
  *
  * A column whose windows carry weights pools in their unit instead, so a Max
- * 20x session counts twenty Pro sessions rather than one more 100%; it is
- * listed apart from the folded secondary lines (see `ProviderSummaryLine.weighting`).
+ * 20x session counts twenty Pro sessions rather than one more 100%, and leaves
+ * out credentials not loaded yet, whose share is unknown. It is listed apart
+ * from the folded secondary lines (see `ProviderSummaryLine.weighting`).
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],
@@ -271,6 +273,7 @@ export function summarizeProvider(
     const segments: (number | null)[] = [];
     const pace: PaceCounts = { over: 0, on: 0, under: 0 };
     // Unweighted windows weigh 1, which leaves the sums exactly as they were.
+    // Null marks a credential not loaded yet, which a weighted pool leaves out.
     const weights: (number | null)[] = [];
     let weighted = false;
     let weightedCapacity = 0;
@@ -301,16 +304,26 @@ export function summarizeProvider(
         nextResetMs = window.resetAtMs;
       }
     }
-    return {
+    const line: ProviderSummaryLine = {
       id: column.id,
       label: column.label,
       totalRemaining: total,
-      capacity: weighted ? weightedCapacity : segments.length * 100,
+      capacity: segments.length * 100,
       segments,
       nextResetMs,
       coverage,
       pace,
-      ...(weighted ? { weighting: { weights, assumed } } : {}),
+    };
+    if (!weighted) return line;
+    const pooled = (_: unknown, index: number) => weights[index] !== null;
+    return {
+      ...line,
+      capacity: weightedCapacity,
+      segments: segments.filter(pooled),
+      weighting: {
+        weights: weights.filter((weight): weight is number => weight !== null),
+        assumed,
+      },
     };
   });
 

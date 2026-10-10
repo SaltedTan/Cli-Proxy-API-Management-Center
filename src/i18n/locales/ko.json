@@ -1804,6 +1804,8 @@
     "summary_pro_units_segments_label": "자격 증명 {{count}}개 전체에서 {{capacity}} 중 {{total}} 남음, Pro 5시간 한도 단위",
     "summary_pro_units_assumed_one": "{{count}}개는 Pro로 계산됨 (플랜 알 수 없음)",
     "summary_pro_units_assumed_other": "{{count}}개는 Pro로 계산됨 (플랜 알 수 없음)",
+    "summary_pro_units_not_loaded_one": "{{count}}개 아직 불러오지 않음, 계산에서 제외",
+    "summary_pro_units_not_loaded_other": "{{count}}개 아직 불러오지 않음, 계산에서 제외",
     "windows_reset_credit": "수동 초기화",
     "windows_credit_granted": "부여 일시",
     "windows_credit_expires": "만료 일시",

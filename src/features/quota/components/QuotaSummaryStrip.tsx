@@ -9,7 +9,8 @@
  * how many credentials could serve the model now, and whether any is projected
  * to stop before its refill. A weighted pool (Claude's 5-hour limit, counted in
  * Pro sessions) follows the headline, always in view, with segments as wide as
- * each credential's share. Other secondary windows fold behind a toggle — the
+ * each credential's share; until a Claude credential reports it, a placeholder
+ * holds its place. Other secondary windows fold behind a toggle — the
  * strip is for orientation, the ledger below is for detail.
  *
  * Credentials the proxy will not select (disabled, or unavailable for a reason
@@ -104,6 +105,11 @@ function SummaryCell({
     headline?.segments ?? Array.from({ length: summary.credentialCount }, () => null);
   const [firstSecondary, ...moreSecondary] = summary.secondary;
   const listId = `quota-summary-${provider}-more`;
+  const notLoaded = summary.credentialCount - summary.loadedCount;
+  // Claude's 5-hour pool keeps its place while credentials load or refresh, so
+  // the strip does not jump when the first one reports it.
+  const sessionPending =
+    provider === 'claude' && summary.weighted.length === 0 && !headline?.weighting && notLoaded > 0;
 
   return (
     <article className={styles.cell}>
@@ -143,7 +149,9 @@ function SummaryCell({
         weights={headline?.weighting?.weights}
         label={segmentsLabel(t, headline, segments.length)}
       />
-      {headline?.weighting && <WeightingNotes assumed={headline.weighting.assumed} />}
+      {headline?.weighting && (
+        <WeightingNotes assumed={headline.weighting.assumed} notLoaded={notLoaded} />
+      )}
 
       {(group.unavailable ?? 0) > 0 && (
         <div className={styles.unavailable}>
@@ -159,8 +167,24 @@ function SummaryCell({
       {headline && <PaceLine pace={headline.pace} />}
 
       {summary.weighted.map((line) => (
-        <WeightedBlock key={line.id} line={line} />
+        <WeightedBlock
+          key={line.id}
+          label={line.label}
+          line={line}
+          notLoaded={notLoaded}
+          now={now}
+          locale={i18n.resolvedLanguage}
+        />
       ))}
+      {sessionPending && (
+        <WeightedBlock
+          label={t('claude_quota.five_hour')}
+          line={null}
+          notLoaded={notLoaded}
+          now={now}
+          locale={i18n.resolvedLanguage}
+        />
+      )}
 
       {summary.models.map((model) => (
         <ModelBlock key={model.line.id} model={model} locale={i18n.resolvedLanguage} />
@@ -199,17 +223,14 @@ function SummaryCell({
   );
 }
 
-/**
- * One segment per credential. With weights, each segment is as wide as its
- * share of the pool; a credential not loaded yet has no weight and takes one unit.
- */
+/** One segment per pooled credential; with weights, each as wide as its share of the pool. */
 function Segments({
   segments,
   weights,
   label,
 }: {
   segments: (number | null)[];
-  weights?: (number | null)[];
+  weights?: number[];
   label: string;
 }) {
   return (
@@ -218,7 +239,7 @@ function Segments({
         <span
           key={index}
           className={styles.segment}
-          style={weights ? { flexGrow: weights[index] ?? 1 } : undefined}
+          style={weights ? { flexGrow: weights[index] } : undefined}
         >
           {remaining !== null && (
             <span
@@ -235,31 +256,57 @@ function Segments({
 /**
  * A pool counted in weighted units rather than 100% per credential: Claude's
  * 5-hour limit in Pro sessions, so a Max 20x account holds twenty times what a
- * Pro one does. Always in view — no other line on the strip implies it.
+ * Pro one does. Always in view — no other line on the strip implies it. With
+ * no line yet (nothing that reports it has loaded), it is a placeholder: an
+ * unknown figure over an empty track.
  */
-function WeightedBlock({ line }: { line: ProviderSummaryLine }) {
+function WeightedBlock({
+  label,
+  line,
+  notLoaded,
+  now,
+  locale,
+}: {
+  label: string;
+  line: ProviderSummaryLine | null;
+  notLoaded: number;
+  now: number;
+  locale?: string;
+}) {
   const { t } = useTranslation();
   return (
     <div className={styles.model}>
-      <div className={styles.headlineLabel}>{line.label}</div>
+      <div className={styles.headlineLabel}>{label}</div>
       <div className={styles.figure}>
-        <span className={styles.modelTotal}>{formatPercent(line.totalRemaining)}</span>
-        <span className={styles.capacity}>
-          {t('quota_management.summary_of_capacity', { capacity: line.capacity })}
-        </span>
+        <span className={styles.modelTotal}>{formatPercent(line?.totalRemaining ?? null)}</span>
+        {line && (
+          <span className={styles.capacity}>
+            {t('quota_management.summary_of_capacity', { capacity: line.capacity })}
+          </span>
+        )}
       </div>
-      <Segments
-        segments={line.segments}
-        weights={line.weighting?.weights}
-        label={segmentsLabel(t, line, line.segments.length)}
-      />
-      <WeightingNotes assumed={line.weighting?.assumed ?? 0} />
+      {line ? (
+        <Segments
+          segments={line.segments}
+          weights={line.weighting?.weights}
+          label={segmentsLabel(t, line, line.segments.length)}
+        />
+      ) : (
+        <div className={styles.segments} aria-hidden="true">
+          <span className={styles.segment} />
+        </div>
+      )}
+      {line?.nextResetMs != null && <ResetLine atMs={line.nextResetMs} now={now} locale={locale} />}
+      <WeightingNotes assumed={line?.weighting?.assumed ?? 0} notLoaded={notLoaded} />
     </div>
   );
 }
 
-/** The unit a weighted pool counts in, and how many credentials it had to guess. */
-function WeightingNotes({ assumed }: { assumed: number }) {
+/**
+ * The unit a weighted pool counts in, how many credentials it had to guess, and
+ * how many it leaves out until they load.
+ */
+function WeightingNotes({ assumed, notLoaded }: { assumed: number; notLoaded: number }) {
   const { t } = useTranslation();
   return (
     <>
@@ -267,9 +314,15 @@ function WeightingNotes({ assumed }: { assumed: number }) {
         {t('quota_management.summary_pro_units_hint', { scale: formatClaudeSessionScale(t) })}
       </div>
       {assumed > 0 && (
-        <div className={styles.weightAssumed}>
+        <div className={styles.weightNote}>
           <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
           {t('quota_management.summary_pro_units_assumed', { count: assumed })}
+        </div>
+      )}
+      {notLoaded > 0 && (
+        <div className={styles.weightNote}>
+          <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
+          {t('quota_management.summary_pro_units_not_loaded', { count: notLoaded })}
         </div>
       )}
     </>

@@ -15,7 +15,7 @@ import i18n from '@/i18n';
 import { QuotaSummaryStrip } from '@/features/quota/components/QuotaSummaryStrip';
 import { summarizeProvider } from '@/features/quota/ledgerModel';
 import { buildClaudeLedger } from '@/features/quota/providers/claude/ledger';
-import { DAY_MS } from '@/utils/time/durations';
+import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 import type { ClaudeQuotaState, ClaudeQuotaWindow } from '@/types';
 import en from '@/i18n/locales/en.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
@@ -160,7 +160,8 @@ describe('QuotaSummaryStrip', () => {
       key: string,
       scope: 'account' | 'scoped',
       usedPercent: number,
-      periodHours: number
+      periodHours: number,
+      resetAtMs = NOW + DAY_MS
     ): ClaudeQuotaWindow => ({
       id: key.replace(/_/g, '-'),
       label: key,
@@ -168,17 +169,28 @@ describe('QuotaSummaryStrip', () => {
       scope,
       usedPercent,
       resetLabel: '-',
-      resetAtMs: NOW + DAY_MS,
+      resetAtMs,
       periodHours,
     });
-    const claude = (planType: string | null, session: number): ClaudeQuotaState => ({
+    const SESSION_RESET = NOW + 2 * HOUR_MS;
+    const claude = (
+      planType: string | null,
+      session: number | null,
+      weekly = true
+    ): ClaudeQuotaState => ({
       status: 'success',
       planType,
       windows: [
-        claudeWindow('five_hour', 'account', 100 - session, 5),
-        claudeWindow('seven_day', 'account', 30, 168),
-        claudeWindow('seven_day_oauth_apps', 'scoped', 10, 168),
-        claudeWindow('seven_day_cowork', 'scoped', 10, 168),
+        ...(session === null
+          ? []
+          : [claudeWindow('five_hour', 'account', 100 - session, 5, SESSION_RESET)]),
+        ...(weekly
+          ? [
+              claudeWindow('seven_day', 'account', 30, 168),
+              claudeWindow('seven_day_oauth_apps', 'scoped', 10, 168),
+              claudeWindow('seven_day_cowork', 'scoped', 10, 168),
+            ]
+          : []),
       ],
     });
     const render = (...quotas: (ClaudeQuotaState | null)[]) =>
@@ -197,6 +209,10 @@ describe('QuotaSummaryStrip', () => {
           now: NOW,
         })
       );
+    /** The 5-hour block's markup, from its label to its unit hint. */
+    const sessionBlock = (markup: string) =>
+      markup.slice(markup.indexOf('5-hour limit'), markup.indexOf('In Pro units'));
+    const count = (markup: string, text: string) => markup.split(text).length - 1;
 
     test('reads in Pro sessions, right after the headline and never folded', () => {
       // Pro 30% + Max 5x 50% + Max 20x 90% = 30 + 250 + 1800 of 100 + 500 + 2000.
@@ -212,9 +228,12 @@ describe('QuotaSummaryStrip', () => {
         'aria-label="2080% of 2600% remaining across 3 credentials, in Pro 5-hour units"'
       );
       expect(markup).not.toContain('counted as Pro');
+      expect(markup).not.toContain('not loaded yet');
       // Segments are as wide as each credential's share of the pool.
       expect(markup).toContain('style="flex-grow:5"');
       expect(markup).toContain('style="flex-grow:20"');
+      // When the pool next grows: the soonest 5-hour reset, not the weekly one.
+      expect(sessionBlock(markup)).toContain('in 2 hours');
 
       const headline = markup.indexOf('7-day limit');
       const session = markup.indexOf('5-hour limit');
@@ -235,11 +254,79 @@ describe('QuotaSummaryStrip', () => {
         claude('plan_max20', 50),
         null
       );
-      // 40 + 40 + 1000 of 100 + 100 + 2000; the unloaded credential adds no capacity.
+      // 40 + 40 + 1000 of 100 + 100 + 2000; the unloaded credential is left out.
       expect(markup).toContain('1080%');
       expect(markup).toContain('of 2200%');
       expect(markup).toContain('2 counted as Pro (plan unknown)');
-      expect(markup).toContain('across 4 credentials, in Pro 5-hour units');
+      expect(markup).toContain('across 3 credentials, in Pro 5-hour units');
+      expect(markup).toContain('1 not loaded yet, not counted');
+    });
+
+    test('draws only the credentials it counts, so the bar matches its capacity', () => {
+      const markup = render(claude('plan_pro', 100), null);
+      expect(markup).toContain('100%');
+      expect(markup).toContain('of 100%');
+      const block = sessionBlock(markup);
+      expect(block).toContain('across 1 credentials, in Pro 5-hour units');
+      expect(count(block, 'flex-grow:')).toBe(1);
+      expect(count(block, 'style="width:')).toBe(1);
+      expect(markup).toContain('1 not loaded yet, not counted');
+      // The unweighted headline still keeps a blank segment for the unloaded credential.
+      expect(markup).toContain('aria-label="70% of 200% remaining across 2 credentials"');
+    });
+
+    test('lines each weight up with its own credential past one without the window', () => {
+      const markup = render(
+        claude('plan_max5', 40),
+        claude('plan_max20', null),
+        claude('plan_max20', 90)
+      );
+      const block = sessionBlock(markup);
+      expect(markup).toContain('of 2500%');
+      expect(block).toContain('across 2 credentials, in Pro 5-hour units');
+      expect(block).toMatch(/flex-grow:5"><span[^>]*width:40%.*flex-grow:20"><span[^>]*width:90%/);
+      expect(markup).not.toContain('not loaded yet');
+    });
+
+    test('weights the headline when the 5-hour limit is all a provider reports', () => {
+      const markup = render(claude('plan_pro', 50, false), claude('plan_max20', 10, false));
+      expect(count(markup, '5-hour limit')).toBe(1);
+      expect(markup).toContain('250%');
+      expect(markup).toContain('of 2100%');
+      expect(markup).toContain('across 2 credentials, in Pro 5-hour units');
+      expect(markup).toContain('style="flex-grow:20"');
+      expect(count(markup, 'In Pro units')).toBe(1);
+    });
+
+    test('holds its place while nothing that reports it has loaded', () => {
+      const markup = render(null, null);
+      expect(markup).toContain('Not loaded yet');
+      expect(markup).toContain('5-hour limit');
+      expect(markup).toContain('In Pro units');
+      expect(markup).toContain('2 not loaded yet, not counted');
+      // Unknown figure, no capacity to claim, and an empty track rather than a pool bar.
+      expect(count(markup, '<span>--</span>')).toBe(2);
+      expect(count(markup, 'in Pro 5-hour units')).toBe(0);
+      expect(markup.indexOf('5-hour limit')).toBeGreaterThan(markup.indexOf('Not loaded yet'));
+
+      // A loaded credential without the window, beside one still loading: still a placeholder.
+      expect(render(claude('plan_pro', null), null)).toContain('1 not loaded yet, not counted');
+      // Everything loaded and no 5-hour limit anywhere: nothing to hold a place for.
+      expect(render(claude('plan_pro', null))).not.toContain('5-hour limit');
+
+      // Other providers' empty states are unchanged.
+      for (const provider of ['codex', 'kimi'] as const) {
+        const other = renderToStaticMarkup(
+          createElement(QuotaSummaryStrip, {
+            groups: [{ provider, summary: summarizeProvider([null, null], NOW) }],
+            resolvedTheme: 'dark',
+            now: NOW,
+          })
+        );
+        expect(other).not.toContain('5-hour limit');
+        expect(other).not.toContain('In Pro units');
+        expect(other).not.toContain('not counted');
+      }
     });
   });
 
@@ -401,6 +488,9 @@ describe('Claude 5-hour pool locale keys', () => {
       const assumed = quota.summary_pro_units_assumed ?? quota.summary_pro_units_assumed_other;
       expect(assumed).toContain('{{count}}');
       expect(assumed).toContain('Pro');
+      const notLoaded =
+        quota.summary_pro_units_not_loaded ?? quota.summary_pro_units_not_loaded_other;
+      expect(notLoaded).toContain('{{count}}');
       // Plan names stay untranslated, so the scale reads the same everywhere.
       for (const plan of ['plan_pro', 'plan_team', 'plan_max5', 'plan_max20'] as const) {
         expect(messages.claude_quota[plan]).toBe(en.claude_quota[plan]);
