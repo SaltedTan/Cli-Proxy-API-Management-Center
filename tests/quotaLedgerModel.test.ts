@@ -257,7 +257,7 @@ describe('summarizeProvider', () => {
      */
     const gatedMax20 = (
       sevenDayResetAtMs: number | null,
-      session = 100,
+      session: number | null = 100,
       sessionResetAtMs: number | null = null,
       sevenDay = 0
     ): LedgerSnapshot => ({
@@ -455,12 +455,48 @@ describe('summarizeProvider', () => {
           ...gatedMax20(NOW + DAY_MS),
           windows: [
             ...gatedMax20(NOW + DAY_MS).windows,
-            win({ id: 'seven-day-other', remaining: 0, resetAtMs: NOW + 3 * DAY_MS }),
+            win({
+              id: 'seven-day-other',
+              remaining: 0,
+              resetAtMs: NOW + 3 * DAY_MS,
+              scope: 'account',
+            }),
             // A scoped limit never gates the whole account.
             win({ id: 'scoped', remaining: 0, resetAtMs: NOW + 5 * DAY_MS, scope: 'scoped' }),
           ],
         };
         expect(sessionOf([twoGates]).nextResetMs).toBe(NOW + 3 * DAY_MS);
+      });
+
+      test('tops up when quota actually comes back, as the proxy reckons it', () => {
+        const lift = NOW + HOUR_MS;
+        const later = NOW + 4 * HOUR_MS;
+        const topUp = (session: number | null, sessionResetAtMs: number | null) =>
+          sessionOf([gatedMax20(lift, session, sessionResetAtMs)]).nextResetMs;
+        // A spent session that resets after the lift: nothing is usable until it does.
+        expect(topUp(0, later)).toBe(later);
+        // …and with its reset unknown, nothing is known to come back at all.
+        expect(topUp(0, null)).toBeNull();
+        // A part-used session: its unused part comes back at the lift.
+        expect(topUp(30, later)).toBe(lift);
+        expect(topUp(30, null)).toBe(lift);
+        // A session that resets before the lift, or is untouched, all comes back at the lift.
+        expect(sessionOf([gatedMax20(later, 0, lift)]).nextResetMs).toBe(later);
+        expect(topUp(100, later)).toBe(lift);
+        // No session figure: the lift, as before.
+        expect(topUp(null, later)).toBe(lift);
+      });
+
+      test('only an account-wide limit gates; one without a scope does not', () => {
+        const unscoped: LedgerSnapshot = {
+          plan: null,
+          windows: gatedMax20(NOW + 2 * DAY_MS).windows.map((window) =>
+            window.id === 'seven-day' ? { ...window, scope: undefined } : window
+          ),
+        };
+        const session = sessionOf([unscoped]);
+        expect(session.weighting?.gated).toBe(0);
+        expect(session.totalRemaining).toBe(2000);
       });
     });
 

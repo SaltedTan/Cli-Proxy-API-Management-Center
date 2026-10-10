@@ -238,19 +238,44 @@ export interface ProviderSummary {
 }
 
 /**
- * The credential's other account-wide limits that are used up — the same test
- * as laneModel's empty gates, so the strip and the lanes agree — and still
- * stop it: a used-up reading whose reset has passed has already reset.
+ * The credential's other account-wide limits that are used up and still stop
+ * it. Account-wide and used up mean what they do for laneModel's empty gates
+ * (`scope === 'account'`, nothing left), so the strip and the lanes agree; a
+ * used-up reading whose reset has passed has already reset, so it stops nothing.
  */
 const usedUpGates = (snapshot: LedgerSnapshot, window: LedgerWindow, nowMs: number) =>
   snapshot.windows.filter(
     (gate) =>
       gate.id !== window.id &&
-      gate.scope !== 'scoped' &&
+      gate.scope === 'account' &&
       gate.remaining !== null &&
       gate.remaining <= 0 &&
       (gate.resetAtMs === null || gate.resetAtMs > nowMs)
   );
+
+/**
+ * When a gated credential's share of the pool next grows, by the proxy's own
+ * rule (the weekly-blocked branch of combineWindow in internal/keyusage/pool.go):
+ * nothing is usable before the gate lifts at `gateLiftMs`. If the session will
+ * not have reset by then, its unused part comes back at the lift and its used
+ * part at the session's own reset; otherwise all of it comes back at the lift.
+ * A top-up that restores nothing is no top-up. Null when none is known.
+ */
+const gatedTopUpMs = (
+  remaining: number | null,
+  ownResetMs: number | null,
+  gateLiftMs: number | null
+): number | null => {
+  if (gateLiftMs === null) return null;
+  if (remaining !== null && remaining < 100 && (ownResetMs === null || ownResetMs > gateLiftMs)) {
+    const topUps = [
+      ...(remaining > 0 ? [gateLiftMs] : []),
+      ...(ownResetMs !== null ? [ownResetMs] : []),
+    ];
+    return topUps.length > 0 ? Math.min(...topUps) : null;
+  }
+  return gateLiftMs;
+};
 
 /**
  * Roll a provider's credentials up into pooled lines, one per column.
@@ -282,7 +307,8 @@ const usedUpGates = (snapshot: LedgerSnapshot, window: LedgerWindow, nowMs: numb
  * resets, however full the window reads — an exhausted Max 20x often shows an
  * untouched 5-hour session. It keeps its weight in capacity, adds nothing left,
  * draws an empty segment and has no pace; it next tops up when the gate lifts,
- * or never as far as the pool can tell when that reset is unknown. This
+ * or later when its session is spent and resets after that (see `gatedTopUpMs`),
+ * and never as far as the pool can tell when the gate's reset is unknown. This
  * matches the proxy's own key-usage pool (internal/keyusage/pool.go).
  */
 export function summarizeProvider(
@@ -325,11 +351,12 @@ export function summarizeProvider(
         gated += 1;
         segments.push(0);
         total = total ?? 0;
-        // The gate that lifts last, as a lane waits on it; any unknown reset means no top-up.
+        // The gate that lifts last, as a lane waits on it; an unknown reset never lifts.
         const resets = gates.map((gate) => gate.resetAtMs);
-        if (!resets.includes(null)) {
-          const liftAtMs = Math.max(...(resets as number[]));
-          if (nextResetMs === null || liftAtMs < nextResetMs) nextResetMs = liftAtMs;
+        const liftMs = resets.includes(null) ? null : Math.max(...(resets as number[]));
+        const topUpMs = gatedTopUpMs(window.remaining, window.resetAtMs, liftMs);
+        if (topUpMs !== null && (nextResetMs === null || topUpMs < nextResetMs)) {
+          nextResetMs = topUpMs;
         }
         continue;
       }
