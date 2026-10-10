@@ -176,7 +176,8 @@ describe('QuotaSummaryStrip', () => {
     const claude = (
       planType: string | null,
       session: number | null,
-      weekly = true
+      weekly = true,
+      weeklyUsed = 30
     ): ClaudeQuotaState => ({
       status: 'success',
       planType,
@@ -186,7 +187,7 @@ describe('QuotaSummaryStrip', () => {
           : [claudeWindow('five_hour', 'account', 100 - session, 5, SESSION_RESET)]),
         ...(weekly
           ? [
-              claudeWindow('seven_day', 'account', 30, 168),
+              claudeWindow('seven_day', 'account', weeklyUsed, 168),
               claudeWindow('seven_day_oauth_apps', 'scoped', 10, 168),
               claudeWindow('seven_day_cowork', 'scoped', 10, 168),
             ]
@@ -296,6 +297,28 @@ describe('QuotaSummaryStrip', () => {
       expect(markup).toContain('across 2 credentials, in Pro 5-hour units');
       expect(markup).toContain('style="flex-grow:20"');
       expect(count(markup, 'In Pro units')).toBe(1);
+    });
+
+    test('counts a subscription out of its 7-day limit as empty, and says so', () => {
+      // The Max 20x has used up its week; its untouched session cannot be spent.
+      const markup = render(claude('plan_pro', 40), claude('plan_max20', 100, true, 100));
+      const block = sessionBlock(markup);
+      expect(block).toContain('<span>40%</span>');
+      expect(block).toContain('of 2100%');
+      expect(block).toMatch(/flex-grow:20"><span[^>]*width:0%/);
+      expect(markup).toContain('1 has used up its 7-day limit, counted as empty until it resets');
+      // The Pro session's refill is still the pool's next top-up.
+      expect(block).toContain('in 2 hours');
+
+      const both = render(
+        claude('plan_max20', 100, true, 100),
+        claude('plan_max5', 100, true, 100),
+        claude('plan_pro', 40)
+      );
+      expect(both).toContain(
+        '2 have used up their 7-day limits, counted as empty until they reset'
+      );
+      expect(render(claude('plan_pro', 40))).not.toContain('used up');
     });
 
     test('holds its place while nothing that reports it has loaded', () => {
@@ -505,6 +528,9 @@ describe('Claude 5-hour pool locale keys', () => {
       const notLoaded =
         quota.summary_pro_units_not_loaded ?? quota.summary_pro_units_not_loaded_other;
       expect(notLoaded).toContain('{{count}}');
+      const gated = quota.summary_pro_units_gated ?? quota.summary_pro_units_gated_other;
+      expect(gated).toContain('{{count}}');
+      expect(gated).toContain('7');
       // Plan names stay untranslated, so the scale reads the same everywhere.
       for (const plan of ['plan_pro', 'plan_team', 'plan_max5', 'plan_max20'] as const) {
         expect(messages.claude_quota[plan]).toBe(en.claude_quota[plan]);

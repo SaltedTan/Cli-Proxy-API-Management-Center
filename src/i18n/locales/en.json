@@ -1804,6 +1804,8 @@
     "summary_pro_units_segments_label": "{{total}} of {{capacity}} remaining across {{count}} credentials, in Pro 5-hour units",
     "summary_pro_units_assumed_one": "{{count}} counted as Pro (plan unknown)",
     "summary_pro_units_assumed_other": "{{count}} counted as Pro (plan unknown)",
+    "summary_pro_units_gated_one": "{{count}} has used up its 7-day limit, counted as empty until it resets",
+    "summary_pro_units_gated_other": "{{count}} have used up their 7-day limits, counted as empty until they reset",
     "summary_pro_units_not_loaded_one": "{{count}} not loaded yet, not counted",
     "summary_pro_units_not_loaded_other": "{{count}} not loaded yet, not counted",
     "windows_reset_credit": "Manual reset",

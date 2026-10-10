@@ -251,6 +251,35 @@ describe('summarizeProvider', () => {
         win({ id: 'oauth', remaining: 90, periodHours: 168, scope: 'scoped' }),
       ],
     });
+    /**
+     * A Max 20x out of its 7-day limit, its 5-hour session reading untouched —
+     * or, with `sevenDay` given, the same account with that much of the week left.
+     */
+    const gatedMax20 = (
+      sevenDayResetAtMs: number | null,
+      session = 100,
+      sessionResetAtMs: number | null = null,
+      sevenDay = 0
+    ): LedgerSnapshot => ({
+      plan: null,
+      windows: [
+        win({
+          id: 'seven-day',
+          remaining: sevenDay,
+          resetAtMs: sevenDayResetAtMs,
+          periodHours: 168,
+          scope: 'account',
+        }),
+        win({
+          id: 'five-hour',
+          remaining: session,
+          resetAtMs: sessionResetAtMs,
+          periodHours: 5,
+          scope: 'account',
+          weight: 20,
+        }),
+      ],
+    });
     // Pro, Team, Max 5x and Max 20x, plus one credential not loaded yet.
     const pool = [
       credential(80, 50, 1),
@@ -269,7 +298,7 @@ describe('summarizeProvider', () => {
       // left out of the pool — no capacity, and no segment the bar would draw.
       expect(session.capacity).toBe(2725);
       expect(session.segments).toEqual([50, 80, 40, 90]);
-      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20], assumed: 0 });
+      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20], assumed: 0, gated: 0 });
       expect(session.coverage).toBe(4);
       expect(session.nextResetMs).toBe(NOW + HOUR_MS);
     });
@@ -296,6 +325,29 @@ describe('summarizeProvider', () => {
       expect('weighting' in summary.secondary[0]).toBe(false);
       expect(summary.secondary[0].capacity).toBe(500);
       expect(summarizeProvider(snapshots, NOW).weighted).toEqual([]);
+
+      // Gating changes weighted lines only: with the weights stripped, every line
+      // (the 5-hour one included) pools exactly as an unweighted line always has.
+      const withGate = [...pool, gatedMax20(NOW + 2 * DAY_MS)];
+      const unweighted = withGate.map((snapshot) =>
+        snapshot === null
+          ? null
+          : {
+              ...snapshot,
+              windows: snapshot.windows.map(
+                ({ weight: _weight, weightAssumed: _assumed, ...window }) => window
+              ),
+            }
+      );
+      const weightedSummary = summarizeProvider(withGate, NOW);
+      const plain = summarizeProvider(unweighted, NOW);
+      expect(weightedSummary.headline).toEqual(plain.headline);
+      expect(weightedSummary.secondary).toEqual(
+        plain.secondary.filter((l) => l.id !== 'five-hour')
+      );
+      const plainSession = plain.secondary.find((line) => line.id === 'five-hour');
+      expect(plainSession?.totalRemaining).toBe(50 + 80 + 40 + 90 + 100);
+      expect(plainSession?.capacity).toBe(600);
     });
 
     test('counts stand-in weights, and still pools a credential without a figure', () => {
@@ -338,6 +390,78 @@ describe('summarizeProvider', () => {
       expect(summary.headline?.totalRemaining).toBe(250);
       expect(summary.headline?.segments).toEqual([50, 10]);
       expect(summary.weighted).toEqual([]);
+    });
+
+    describe('a credential out of its 7-day limit', () => {
+      const pro = (session: number, resetAtMs: number | null): LedgerSnapshot => ({
+        plan: null,
+        windows: [
+          win({ id: 'seven-day', remaining: 60, periodHours: 168, scope: 'account' }),
+          win({
+            id: 'five-hour',
+            remaining: session,
+            resetAtMs,
+            periodHours: 5,
+            scope: 'account',
+            weight: 1,
+          }),
+        ],
+      });
+      const sessionOf = (pooled: (LedgerSnapshot | null)[]) =>
+        summarizeProvider(pooled, NOW).weighted[0];
+
+      test('keeps its weight in capacity but counts none of its full session as left', () => {
+        const session = sessionOf([pro(40, null), gatedMax20(NOW + 2 * DAY_MS)]);
+        expect(session.capacity).toBe(2100);
+        expect(session.totalRemaining).toBe(40);
+        expect(session.segments).toEqual([40, 0]);
+        expect(session.weighting).toEqual({ weights: [1, 20], assumed: 0, gated: 1 });
+        // It next tops up when the 7-day limit resets…
+        expect(session.nextResetMs).toBe(NOW + 2 * DAY_MS);
+        // …unless another credential's session refills first.
+        expect(sessionOf([pro(40, NOW + HOUR_MS), gatedMax20(NOW + 2 * DAY_MS)]).nextResetMs).toBe(
+          NOW + HOUR_MS
+        );
+      });
+
+      test('a 7-day reading whose reset has passed has already reset, so gates nothing', () => {
+        const session = sessionOf([pro(40, null), gatedMax20(NOW - HOUR_MS)]);
+        expect(session.totalRemaining).toBe(40 + 2000);
+        expect(session.segments).toEqual([40, 100]);
+        expect(session.weighting?.gated).toBe(0);
+      });
+
+      test('an unknown 7-day reset still gates, with no top-up to report', () => {
+        const session = sessionOf([pro(40, null), gatedMax20(null)]);
+        expect(session.totalRemaining).toBe(40);
+        expect(session.weighting?.gated).toBe(1);
+        expect(session.nextResetMs).toBeNull();
+      });
+
+      test('its own session neither paces nor names the next top-up', () => {
+        // 90% used an hour into the session: over pace, were it not gated.
+        const sessionReset = NOW + 4 * HOUR_MS;
+        const open = sessionOf([gatedMax20(NOW + 2 * DAY_MS, 10, sessionReset, 50)]);
+        expect(open.pace).toEqual({ over: 1, on: 0, under: 0 });
+        expect(open.nextResetMs).toBe(sessionReset);
+        const gated = sessionOf([gatedMax20(NOW + 2 * DAY_MS, 10, sessionReset)]);
+        expect(gated.pace).toEqual({ over: 0, on: 0, under: 0 });
+        expect(gated.nextResetMs).toBe(NOW + 2 * DAY_MS);
+        expect(gated.totalRemaining).toBe(0);
+      });
+
+      test('with several used-up limits, it waits on the one that lifts last', () => {
+        const twoGates: LedgerSnapshot = {
+          ...gatedMax20(NOW + DAY_MS),
+          windows: [
+            ...gatedMax20(NOW + DAY_MS).windows,
+            win({ id: 'seven-day-other', remaining: 0, resetAtMs: NOW + 3 * DAY_MS }),
+            // A scoped limit never gates the whole account.
+            win({ id: 'scoped', remaining: 0, resetAtMs: NOW + 5 * DAY_MS, scope: 'scoped' }),
+          ],
+        };
+        expect(sessionOf([twoGates]).nextResetMs).toBe(NOW + 3 * DAY_MS);
+      });
     });
 
     test('nothing loaded yet leaves no weighted line', () => {

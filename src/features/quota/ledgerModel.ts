@@ -191,12 +191,16 @@ export interface ProviderSummaryLine {
    * loaded credential. A credential not loaded yet is left out of the pool,
    * segments included: its weight is unknown until it loads, and a bar drawn
    * against this capacity must not hold room the capacity does not count.
+   * A credential gated by another used-up limit keeps its weight in capacity
+   * but counts as empty (see `summarizeProvider`).
    */
   weighting?: {
     /** One per segment, in the same order. */
     weights: number[];
     /** Loaded credentials whose weight is a stand-in for an unknown plan. */
     assumed: number;
+    /** Loaded credentials counted as empty because another limit is used up. */
+    gated: number;
   };
 }
 
@@ -234,6 +238,21 @@ export interface ProviderSummary {
 }
 
 /**
+ * The credential's other account-wide limits that are used up — the same test
+ * as laneModel's empty gates, so the strip and the lanes agree — and still
+ * stop it: a used-up reading whose reset has passed has already reset.
+ */
+const usedUpGates = (snapshot: LedgerSnapshot, window: LedgerWindow, nowMs: number) =>
+  snapshot.windows.filter(
+    (gate) =>
+      gate.id !== window.id &&
+      gate.scope !== 'scoped' &&
+      gate.remaining !== null &&
+      gate.remaining <= 0 &&
+      (gate.resetAtMs === null || gate.resetAtMs > nowMs)
+  );
+
+/**
  * Roll a provider's credentials up into pooled lines, one per column.
  *
  * `snapshots` holds one entry per credential — null when its quota is not
@@ -257,6 +276,14 @@ export interface ProviderSummary {
  * 20x session counts twenty Pro sessions rather than one more 100%, and leaves
  * out credentials not loaded yet, whose share is unknown. It is listed apart
  * from the folded secondary lines (see `ProviderSummaryLine.weighting`).
+ *
+ * In a weighted pool, a credential that has used up another account-wide
+ * limit (Claude's 7-day) cannot spend any of the window until that limit
+ * resets, however full the window reads — an exhausted Max 20x often shows an
+ * untouched 5-hour session. It keeps its weight in capacity, adds nothing left,
+ * draws an empty segment and has no pace; it next tops up when the gate lifts,
+ * or never as far as the pool can tell when that reset is unknown. This
+ * matches the proxy's own key-usage pool (internal/keyusage/pool.go).
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],
@@ -278,6 +305,7 @@ export function summarizeProvider(
     let weighted = false;
     let weightedCapacity = 0;
     let assumed = 0;
+    let gated = 0;
     for (const snapshot of snapshots) {
       if (snapshot === null) {
         segments.push(null);
@@ -292,6 +320,19 @@ export function summarizeProvider(
       weights.push(weight);
       weightedCapacity += 100 * weight;
       coverage += 1;
+      const gates = window.weight !== undefined ? usedUpGates(snapshot, window, nowMs) : [];
+      if (gates.length > 0) {
+        gated += 1;
+        segments.push(0);
+        total = total ?? 0;
+        // The gate that lifts last, as a lane waits on it; any unknown reset means no top-up.
+        const resets = gates.map((gate) => gate.resetAtMs);
+        if (!resets.includes(null)) {
+          const liftAtMs = Math.max(...(resets as number[]));
+          if (nextResetMs === null || liftAtMs < nextResetMs) nextResetMs = liftAtMs;
+        }
+        continue;
+      }
       segments.push(window.remaining);
       if (window.remaining !== null) total = (total ?? 0) + window.remaining * weight;
       const windowPace = computeWindowPace(window, nowMs);
@@ -323,6 +364,7 @@ export function summarizeProvider(
       weighting: {
         weights: weights.filter((weight): weight is number => weight !== null),
         assumed,
+        gated,
       },
     };
   });

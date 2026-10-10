@@ -1756,6 +1756,8 @@
     "summary_pro_units_segments_label": "Còn lại {{total}} / {{capacity}} trên {{count}} credential, tính theo giới hạn 5 giờ của Pro",
     "summary_pro_units_assumed_one": "{{count}} credential được tính là Pro (không rõ gói)",
     "summary_pro_units_assumed_other": "{{count}} credential được tính là Pro (không rõ gói)",
+    "summary_pro_units_gated_one": "{{count}} credential đã dùng hết giới hạn 7 ngày, được tính là trống cho đến khi đặt lại",
+    "summary_pro_units_gated_other": "{{count}} credential đã dùng hết giới hạn 7 ngày, được tính là trống cho đến khi đặt lại",
     "summary_pro_units_not_loaded_one": "{{count}} credential chưa tải, chưa được tính",
     "summary_pro_units_not_loaded_other": "{{count}} credential chưa tải, chưa được tính",
     "windows_reset_credit": "Đặt lại thủ công",

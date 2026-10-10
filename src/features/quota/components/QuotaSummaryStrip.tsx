@@ -150,7 +150,7 @@ function SummaryCell({
         label={segmentsLabel(t, headline, segments.length)}
       />
       {headline?.weighting && (
-        <WeightingNotes assumed={headline.weighting.assumed} notLoaded={notLoaded} />
+        <WeightingNotes weighting={headline.weighting} notLoaded={notLoaded} />
       )}
 
       {(group.unavailable ?? 0) > 0 && (
@@ -301,33 +301,42 @@ function WeightedBlock({
         </div>
       )}
       {line?.nextResetMs != null && <ResetLine atMs={line.nextResetMs} now={now} locale={locale} />}
-      <WeightingNotes assumed={line?.weighting?.assumed ?? 0} notLoaded={notLoaded} />
+      <WeightingNotes weighting={line?.weighting} notLoaded={notLoaded} />
     </div>
   );
 }
 
 /**
- * The unit a weighted pool counts in, how many credentials it had to guess, and
- * how many it leaves out until they load.
+ * The unit a weighted pool counts in; how many credentials it counts as empty
+ * because their 7-day limit is used up, and how many it had to guess a weight
+ * for; and how many it leaves out until they load.
  */
-function WeightingNotes({ assumed, notLoaded }: { assumed: number; notLoaded: number }) {
+function WeightingNotes({
+  weighting,
+  notLoaded,
+}: {
+  weighting?: ProviderSummaryLine['weighting'];
+  notLoaded: number;
+}) {
   const { t } = useTranslation();
+  const notes = [
+    ['summary_pro_units_gated', weighting?.gated ?? 0],
+    ['summary_pro_units_assumed', weighting?.assumed ?? 0],
+    ['summary_pro_units_not_loaded', notLoaded],
+  ] as const;
   return (
     <>
       <div className={styles.weightScale}>
         {t('quota_management.summary_pro_units_hint', { scale: formatClaudeSessionScale(t) })}
       </div>
-      {assumed > 0 && (
-        <div className={styles.weightNote}>
-          <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
-          {t('quota_management.summary_pro_units_assumed', { count: assumed })}
-        </div>
-      )}
-      {notLoaded > 0 && (
-        <div className={styles.weightNote}>
-          <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
-          {t('quota_management.summary_pro_units_not_loaded', { count: notLoaded })}
-        </div>
+      {notes.map(
+        ([key, count]) =>
+          count > 0 && (
+            <div key={key} className={styles.weightNote}>
+              <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
+              {t(`quota_management.${key}`, { count })}
+            </div>
+          )
       )}
     </>
   );
