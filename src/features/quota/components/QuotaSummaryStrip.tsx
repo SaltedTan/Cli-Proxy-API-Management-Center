@@ -149,9 +149,7 @@ function SummaryCell({
         weights={headline?.weighting?.weights}
         label={segmentsLabel(t, headline, segments.length)}
       />
-      {headline?.weighting && (
-        <WeightingNotes weighting={headline.weighting} notLoaded={notLoaded} />
-      )}
+      {headline?.weighting && <WeightingNotes line={headline} notLoaded={notLoaded} />}
 
       {(group.unavailable ?? 0) > 0 && (
         <div className={styles.unavailable}>
@@ -301,7 +299,7 @@ function WeightedBlock({
         </div>
       )}
       {line?.nextResetMs != null && <ResetLine atMs={line.nextResetMs} now={now} locale={locale} />}
-      <WeightingNotes weighting={line?.weighting} notLoaded={notLoaded} />
+      <WeightingNotes line={line} notLoaded={notLoaded} />
     </div>
   );
 }
@@ -312,33 +310,37 @@ function WeightedBlock({
  * for; and how many it leaves out until they load.
  */
 function WeightingNotes({
-  weighting,
+  line,
   notLoaded,
 }: {
-  weighting?: ProviderSummaryLine['weighting'];
+  line: ProviderSummaryLine | null;
   notLoaded: number;
 }) {
   const { t } = useTranslation();
-  const notes = [
-    ['summary_pro_units_gated', weighting?.gated ?? 0],
-    ['summary_pro_units_assumed', weighting?.assumed ?? 0],
-    ['summary_pro_units_not_loaded', notLoaded],
-  ] as const;
   return (
     <>
       <div className={styles.weightScale}>
         {t('quota_management.summary_pro_units_hint', { scale: formatClaudeSessionScale(t) })}
       </div>
-      {notes.map(
-        ([key, count]) =>
-          count > 0 && (
-            <div key={key} className={styles.weightNote}>
-              <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
-              {t(`quota_management.${key}`, { count })}
-            </div>
-          )
-      )}
+      <CountNote textKey="quota_management.summary_pro_units_gated" count={line?.gated ?? 0} />
+      <CountNote
+        textKey="quota_management.summary_pro_units_assumed"
+        count={line?.weighting?.assumed ?? 0}
+      />
+      <CountNote textKey="quota_management.summary_pro_units_not_loaded" count={notLoaded} />
     </>
+  );
+}
+
+/** A count under a pool, with a neutral mark; nothing when the count is 0. */
+function CountNote({ textKey, count }: { textKey: string; count: number }) {
+  const { t } = useTranslation();
+  if (count <= 0) return null;
+  return (
+    <div className={styles.countNote}>
+      <span className={`${styles.mark} ${styles.markUnknown}`} aria-hidden="true" />
+      {t(textKey, { count })}
+    </div>
   );
 }
 
@@ -346,7 +348,8 @@ function WeightingNotes({
  * A model's own limit, pooled like the headline, plus what the ledger's lanes
  * say about it: how many credentials could serve the model right now, and how
  * many are projected to stop before their refill (by any window, not just the
- * model's own — see laneModel.ts).
+ * model's own — see laneModel.ts). A credential out of its 7-day limit counts
+ * as empty in the pool, as in the proxy's own Fable figure.
  */
 function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: string }) {
   const { t } = useTranslation();
@@ -388,6 +391,7 @@ function ModelBlock({ model, locale }: { model: ProviderModelSummary; locale?: s
         weights={line.weighting?.weights}
         label={segmentsLabel(t, line, line.segments.length)}
       />
+      <CountNote textKey="quota_management.summary_pro_units_gated" count={line.gated ?? 0} />
       {(model.serving > 0 || model.partial > 0) && (
         <div className={styles.modelOutlook}>
           <span

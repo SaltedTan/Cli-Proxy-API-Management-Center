@@ -298,7 +298,8 @@ describe('summarizeProvider', () => {
       // left out of the pool — no capacity, and no segment the bar would draw.
       expect(session.capacity).toBe(2725);
       expect(session.segments).toEqual([50, 80, 40, 90]);
-      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20], assumed: 0, gated: 0 });
+      expect(session.weighting).toEqual({ weights: [1, 1.25, 5, 20], assumed: 0 });
+      expect('gated' in session).toBe(false);
       expect(session.coverage).toBe(4);
       expect(session.nextResetMs).toBe(NOW + HOUR_MS);
     });
@@ -326,9 +327,19 @@ describe('summarizeProvider', () => {
       expect(summary.secondary[0].capacity).toBe(500);
       expect(summarizeProvider(snapshots, NOW).weighted).toEqual([]);
 
-      // Gating changes weighted lines only: with the weights stripped, every line
-      // (the 5-hour one included) pools exactly as an unweighted line always has.
-      const withGate = [...pool, gatedMax20(NOW + 2 * DAY_MS)];
+      // Gating touches weighted and model-scoped lines only: with the weights
+      // stripped, every line that is neither (the 5-hour one included) pools
+      // exactly as an unweighted line always has.
+      const gated = gatedMax20(NOW + 2 * DAY_MS);
+      const fable = win({
+        id: 'fable',
+        remaining: 80,
+        resetAtMs: NOW + 3 * DAY_MS,
+        periodHours: 168,
+        scope: 'scoped',
+        model: 'Fable',
+      });
+      const withGate = [...pool, { ...gated, windows: [...gated.windows, fable] }];
       const unweighted = withGate.map((snapshot) =>
         snapshot === null
           ? null
@@ -348,6 +359,9 @@ describe('summarizeProvider', () => {
       const plainSession = plain.secondary.find((line) => line.id === 'five-hour');
       expect(plainSession?.totalRemaining).toBe(50 + 80 + 40 + 90 + 100);
       expect(plainSession?.capacity).toBe(600);
+      // The model line is gated either way: it is model-scoped, weighted or not.
+      expect(weightedSummary.models[0].line.gated).toBe(1);
+      expect(plain.models[0].line.gated).toBe(1);
     });
 
     test('counts stand-in weights, and still pools a credential without a figure', () => {
@@ -415,7 +429,8 @@ describe('summarizeProvider', () => {
         expect(session.capacity).toBe(2100);
         expect(session.totalRemaining).toBe(40);
         expect(session.segments).toEqual([40, 0]);
-        expect(session.weighting).toEqual({ weights: [1, 20], assumed: 0, gated: 1 });
+        expect(session.weighting).toEqual({ weights: [1, 20], assumed: 0 });
+        expect(session.gated).toBe(1);
         // It next tops up when the 7-day limit resets…
         expect(session.nextResetMs).toBe(NOW + 2 * DAY_MS);
         // …unless another credential's session refills first.
@@ -428,13 +443,13 @@ describe('summarizeProvider', () => {
         const session = sessionOf([pro(40, null), gatedMax20(NOW - HOUR_MS)]);
         expect(session.totalRemaining).toBe(40 + 2000);
         expect(session.segments).toEqual([40, 100]);
-        expect(session.weighting?.gated).toBe(0);
+        expect(session.gated).toBeUndefined();
       });
 
       test('an unknown 7-day reset still gates, with no top-up to report', () => {
         const session = sessionOf([pro(40, null), gatedMax20(null)]);
         expect(session.totalRemaining).toBe(40);
-        expect(session.weighting?.gated).toBe(1);
+        expect(session.gated).toBe(1);
         expect(session.nextResetMs).toBeNull();
       });
 
@@ -495,7 +510,7 @@ describe('summarizeProvider', () => {
           ),
         };
         const session = sessionOf([unscoped]);
-        expect(session.weighting?.gated).toBe(0);
+        expect(session.gated).toBeUndefined();
         expect(session.totalRemaining).toBe(2000);
       });
     });
@@ -504,6 +519,124 @@ describe('summarizeProvider', () => {
       const summary = summarizeProvider([null, null], NOW);
       expect(summary.weighted).toEqual([]);
     });
+  });
+});
+
+describe('summarizeProvider: model-scoped lines', () => {
+  // Claude's ledger shape: the account-wide 7-day and 5-hour limits, then Fable.
+  const claudeLike = ({
+    sevenDay = 60,
+    sevenDayReset = NOW + 2 * DAY_MS,
+    session = 50,
+    sessionReset = NOW + 2 * HOUR_MS,
+    fable = 50,
+    fableReset = NOW + 3 * DAY_MS,
+  }: {
+    sevenDay?: number;
+    sevenDayReset?: number | null;
+    session?: number;
+    sessionReset?: number | null;
+    fable?: number;
+    fableReset?: number | null;
+  } = {}): LedgerSnapshot => ({
+    plan: null,
+    windows: [
+      win({
+        id: 'seven-day',
+        remaining: sevenDay,
+        resetAtMs: sevenDayReset,
+        periodHours: 168,
+        scope: 'account',
+      }),
+      win({
+        id: 'five-hour',
+        remaining: session,
+        resetAtMs: sessionReset,
+        periodHours: 5,
+        scope: 'account',
+      }),
+      win({
+        id: 'fable',
+        remaining: fable,
+        resetAtMs: fableReset,
+        periodHours: 168,
+        scope: 'scoped',
+        model: 'Fable',
+      }),
+    ],
+  });
+  const fableOf = (snapshots: (LedgerSnapshot | null)[]) =>
+    summarizeProvider(snapshots, NOW).models[0].line;
+
+  test('are unchanged when nothing is gated', () => {
+    // An empty 5-hour session closes a lane for a while but takes no Fable from the pool.
+    expect(
+      fableOf([claudeLike({ fable: 70 }), claudeLike({ session: 0, fable: 80 }), null])
+    ).toEqual({
+      id: 'fable',
+      label: 'fable',
+      totalRemaining: 150,
+      capacity: 300,
+      segments: [70, 80, null],
+      nextResetMs: NOW + 3 * DAY_MS,
+      coverage: 2,
+      pace: { over: 0, on: 0, under: 2 },
+    });
+  });
+
+  test('count a credential out of its 7-day limit as empty, keeping its place in capacity', () => {
+    const line = fableOf([
+      claudeLike({ fable: 70, fableReset: NOW + 4 * DAY_MS }),
+      claudeLike({ sevenDay: 0, fable: 80 }),
+      null,
+    ]);
+    expect(line.totalRemaining).toBe(70);
+    expect(line.capacity).toBe(300);
+    expect(line.segments).toEqual([70, 0, null]);
+    expect(line.gated).toBe(1);
+    expect(line.coverage).toBe(2);
+    // Its unused Fable comes back when the 7-day limit lifts, before either Fable reset.
+    expect(line.nextResetMs).toBe(NOW + 2 * DAY_MS);
+    expect(line.pace).toEqual({ over: 0, on: 0, under: 1 });
+    expect('weighting' in line).toBe(false);
+  });
+
+  test('time the top-up as the proxy does', () => {
+    const topUp = (fable: number, fableReset: number | null) =>
+      fableOf([claudeLike({ sevenDay: 0, fable, fableReset })]).nextResetMs;
+    // Part left, resetting after the lift: the unused part comes back at the lift.
+    expect(topUp(80, NOW + 3 * DAY_MS)).toBe(NOW + 2 * DAY_MS);
+    // Spent, resetting after the lift: nothing comes back until its own reset.
+    expect(topUp(0, NOW + 3 * DAY_MS)).toBe(NOW + 3 * DAY_MS);
+    expect(topUp(0, null)).toBeNull();
+    // Resetting before the lift: all of it comes back at the lift.
+    expect(topUp(0, NOW + DAY_MS)).toBe(NOW + 2 * DAY_MS);
+  });
+
+  test('an exhausted 5-hour session does not gate the weekly Fable line', () => {
+    const line = fableOf([claudeLike({ session: 0, sessionReset: NOW + HOUR_MS, fable: 80 })]);
+    expect(line.totalRemaining).toBe(80);
+    expect(line.segments).toEqual([80]);
+    expect(line.gated).toBeUndefined();
+  });
+
+  test('a stale 7-day reading gates nothing; an unknown reset gates with no top-up', () => {
+    const stale = fableOf([claudeLike({ sevenDay: 0, sevenDayReset: NOW - HOUR_MS, fable: 80 })]);
+    expect(stale.totalRemaining).toBe(80);
+    expect(stale.gated).toBeUndefined();
+
+    const unknown = fableOf([claudeLike({ sevenDay: 0, sevenDayReset: null, fable: 80 })]);
+    expect(unknown.totalRemaining).toBe(0);
+    expect(unknown.segments).toEqual([0]);
+    expect(unknown.gated).toBe(1);
+    expect(unknown.nextResetMs).toBeNull();
+  });
+
+  test('the gate leaves account-wide and scoped non-model lines as they were', () => {
+    const summary = summarizeProvider([claudeLike({ sevenDay: 0, session: 100 })], NOW);
+    expect(summary.headline?.totalRemaining).toBe(0);
+    expect(summary.secondary.find((line) => line.id === 'five-hour')?.totalRemaining).toBe(100);
+    expect(summary.headline?.gated).toBeUndefined();
   });
 });
 

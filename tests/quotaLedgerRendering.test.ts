@@ -155,6 +155,59 @@ describe('QuotaSummaryStrip', () => {
     expect(short).toMatch(/1 of 1 run out before refill · first ~\S+ \d\d:\d0/);
   });
 
+  test('counts a subscription out of its 7-day limit as empty in its model block', () => {
+    const credential = (weekly: number, fable: number) => ({
+      plan: 'Max 20x',
+      windows: [
+        {
+          ...window('weekly', weekly, 168),
+          label: '7-day limit',
+          scope: 'account' as const,
+          resetAtMs: NOW + 2 * DAY_MS,
+        },
+        {
+          id: 'fable',
+          label: '7-day Fable',
+          remaining: fable,
+          resetAtMs: NOW + 3 * DAY_MS,
+          resetLabel: null,
+          periodHours: 168,
+          scope: 'scoped' as const,
+          model: 'Fable',
+        },
+      ],
+    });
+    const markup = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [
+          {
+            provider: 'claude',
+            summary: summarizeProvider([credential(80, 70), credential(0, 80)], NOW),
+          },
+        ],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    const fableBlock = markup.slice(markup.indexOf('7-day Fable'));
+    // The used-up subscription's 80% Fable is not left: 70% of 200%, not 150%.
+    expect(fableBlock).toContain('<span>70%</span>');
+    expect(fableBlock).toContain('of 200%');
+    expect(fableBlock).toContain('aria-label="70% of 200% remaining across 2 credentials"');
+    expect(fableBlock).toMatch(/width:70%.*width:0%/);
+    expect(fableBlock).toContain('1 has used up its 7-day limit, counted as empty until it resets');
+    expect(fableBlock).toContain('1 of 2 can serve now');
+    // Nothing gated, no note.
+    const open = renderToStaticMarkup(
+      createElement(QuotaSummaryStrip, {
+        groups: [{ provider: 'claude', summary: summarizeProvider([credential(80, 70)], NOW) }],
+        resolvedTheme: 'light',
+        now: NOW,
+      })
+    );
+    expect(open).not.toContain('used up');
+  });
+
   describe('Claude 5-hour pool', () => {
     const claudeWindow = (
       key: string,

@@ -191,17 +191,19 @@ export interface ProviderSummaryLine {
    * loaded credential. A credential not loaded yet is left out of the pool,
    * segments included: its weight is unknown until it loads, and a bar drawn
    * against this capacity must not hold room the capacity does not count.
-   * A credential gated by another used-up limit keeps its weight in capacity
-   * but counts as empty (see `summarizeProvider`).
    */
   weighting?: {
     /** One per segment, in the same order. */
     weights: number[];
     /** Loaded credentials whose weight is a stand-in for an unknown plan. */
     assumed: number;
-    /** Loaded credentials counted as empty because another limit is used up. */
-    gated: number;
   };
+  /**
+   * Loaded credentials counted as empty because a longer account-wide limit is
+   * used up (see `summarizeProvider`); absent when there are none. Only
+   * weighted and model-scoped lines are gated.
+   */
+  gated?: number;
 }
 
 /** A model's own limit, pooled, plus whether its lanes can take a request now. */
@@ -238,10 +240,14 @@ export interface ProviderSummary {
 }
 
 /**
- * The credential's other account-wide limits that are used up and still stop
- * it. Account-wide and used up mean what they do for laneModel's empty gates
- * (`scope === 'account'`, nothing left), so the strip and the lanes agree; a
- * used-up reading whose reset has passed has already reset, so it stops nothing.
+ * The credential's other limits that take `window`'s allowance out of the pool
+ * until they reset. Account-wide and used up mean what they do for laneModel's
+ * empty gates (`scope === 'account'`, nothing left), so the strip and the lanes
+ * agree; a used-up reading whose reset has passed has already reset. The gate
+ * must also be at least as long as `window`: a shorter one — Claude's 5-hour
+ * session beside the weekly Fable limit — refills before the window's own
+ * allowance would, so it closes a lane for a while but takes nothing from the
+ * pool. A limit of unknown length gates, as it would close a lane.
  */
 const usedUpGates = (snapshot: LedgerSnapshot, window: LedgerWindow, nowMs: number) =>
   snapshot.windows.filter(
@@ -250,15 +256,19 @@ const usedUpGates = (snapshot: LedgerSnapshot, window: LedgerWindow, nowMs: numb
       gate.scope === 'account' &&
       gate.remaining !== null &&
       gate.remaining <= 0 &&
-      (gate.resetAtMs === null || gate.resetAtMs > nowMs)
+      (gate.resetAtMs === null || gate.resetAtMs > nowMs) &&
+      (gate.periodHours === null ||
+        window.periodHours === null ||
+        gate.periodHours >= window.periodHours)
   );
 
 /**
  * When a gated credential's share of the pool next grows, by the proxy's own
  * rule (the weekly-blocked branch of combineWindow in internal/keyusage/pool.go):
- * nothing is usable before the gate lifts at `gateLiftMs`. If the session will
- * not have reset by then, its unused part comes back at the lift and its used
- * part at the session's own reset; otherwise all of it comes back at the lift.
+ * nothing is usable before the gate lifts at `gateLiftMs`. If the window (the
+ * 5-hour session, or Fable) will not have reset by then, its unused part comes
+ * back at the lift and its used part at the window's own reset; otherwise all
+ * of it comes back at the lift.
  * A top-up that restores nothing is no top-up. Null when none is known.
  */
 const gatedTopUpMs = (
@@ -302,14 +312,16 @@ const gatedTopUpMs = (
  * out credentials not loaded yet, whose share is unknown. It is listed apart
  * from the folded secondary lines (see `ProviderSummaryLine.weighting`).
  *
- * In a weighted pool, a credential that has used up another account-wide
- * limit (Claude's 7-day) cannot spend any of the window until that limit
- * resets, however full the window reads — an exhausted Max 20x often shows an
- * untouched 5-hour session. It keeps its weight in capacity, adds nothing left,
- * draws an empty segment and has no pace; it next tops up when the gate lifts,
- * or later when its session is spent and resets after that (see `gatedTopUpMs`),
- * and never as far as the pool can tell when the gate's reset is unknown. This
- * matches the proxy's own key-usage pool (internal/keyusage/pool.go).
+ * In a weighted pool or a model-scoped line, a credential that has used up a
+ * longer account-wide limit (Claude's 7-day) cannot spend any of the window
+ * until that limit resets, however full the window reads — an exhausted Max
+ * 20x often shows an untouched 5-hour session and plenty of Fable. It keeps its
+ * place in capacity (its weight, or 100), adds nothing left, draws an empty
+ * segment and has no pace; it next tops up when the gate lifts, or later when
+ * its window is spent and resets after that (see `gatedTopUpMs`), and never as
+ * far as the pool can tell when the gate's reset is unknown. This matches the
+ * proxy's own key-usage pools (internal/keyusage/pool.go), which pool the
+ * 5-hour and Fable figures the same way. Other lines report each window as is.
  */
 export function summarizeProvider(
   snapshots: readonly (LedgerSnapshot | null)[],
@@ -346,7 +358,8 @@ export function summarizeProvider(
       weights.push(weight);
       weightedCapacity += 100 * weight;
       coverage += 1;
-      const gates = window.weight !== undefined ? usedUpGates(snapshot, window, nowMs) : [];
+      const gateable = window.weight !== undefined || isModelWindow(window);
+      const gates = gateable ? usedUpGates(snapshot, window, nowMs) : [];
       if (gates.length > 0) {
         gated += 1;
         segments.push(0);
@@ -381,6 +394,7 @@ export function summarizeProvider(
       nextResetMs,
       coverage,
       pace,
+      ...(gated > 0 ? { gated } : {}),
     };
     if (!weighted) return line;
     const pooled = (_: unknown, index: number) => weights[index] !== null;
@@ -391,7 +405,6 @@ export function summarizeProvider(
       weighting: {
         weights: weights.filter((weight): weight is number => weight !== null),
         assumed,
-        gated,
       },
     };
   });
